@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from aether_core.domain.pipeline import AGENT_WORKSPACE_TITLE, PipelineDefinition
+from aether_pipeline.application.evaluate_retrieval import EvaluateRetrieval, GoldenQuestion
 
 
 def load_env(path: Path) -> None:
@@ -53,10 +54,17 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="Run a pipeline for one or more items")
     run.add_argument("pipeline", type=Path)
     run.add_argument("--item", action="append", required=True, help="Source item ID (repeatable)")
+    evaluate = sub.add_parser("eval", help="Measure retrieval with a golden set (recall@k, MRR)")
+    evaluate.add_argument("pipeline", type=Path)
+    evaluate.add_argument("golden_set", type=Path)
+    evaluate.add_argument("--k", type=int, default=5)
+    evaluate.add_argument("--include-drafts", action="store_true", help="Search drafts too")
     args = parser.parse_args(argv)
 
     load_env(Path(".env"))
     definition = load_definition(args.pipeline)
+    if args.command == "eval":
+        return _evaluate(definition, args.golden_set, args.k, args.include_drafts)
 
     # Heavy adapters are imported only when a run is wired.
     from aether_pipeline.adapters.confluence import ConfluenceReader
@@ -87,6 +95,34 @@ def main(argv: list[str] | None = None) -> int:
     for error in result.errors:
         print(f"  ERROR {error.step} item={error.item}: {error.message}")
     return 0 if result.status == "succeeded" else 1
+
+
+def load_golden_set(path: Path) -> list[GoldenQuestion]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return [
+        GoldenQuestion(q["question"], tuple(q["expected"]), q.get("kind", "semantic"))
+        for q in data["questions"]
+    ]
+
+
+def _evaluate(definition: PipelineDefinition, golden_set: Path, k: int, include_drafts: bool) -> int:
+    from aether_pipeline.adapters.llamaindex_embedder import LlamaIndexFastEmbedEmbedder
+    from aether_pipeline.adapters.llamaindex_qdrant_store import LlamaIndexQdrantStore
+
+    dense = os.environ.get("DENSE_MODEL", "BAAI/bge-base-en-v1.5")
+    use_case = EvaluateRetrieval(
+        LlamaIndexFastEmbedEmbedder(dense, os.environ.get("SPARSE_MODEL", "Qdrant/bm25")),
+        LlamaIndexQdrantStore(os.environ.get("QDRANT_URL", "http://localhost:6333")),
+    )
+    filters = None if include_drafts else {"lifecycle.state": ["validated"]}
+    report = use_case.execute(definition.collection, load_golden_set(golden_set), k, filters)
+    for r in report.results:
+        mark = f"#{r.rank}" if r.rank else "MISS"
+        print(f"{mark:<5} [{r.question.kind}] {r.question.question}")
+        if not r.rank:
+            print(f"      expected {list(r.question.expected)}; got {list(r.returned)}")
+    print(f"questions={len(report.results)} recall@{k}={report.recall_at_k:.3f} MRR={report.mrr:.3f}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,124 @@
+# Golden set for retrieval quality (verification.md, "Retrieval quality: the golden set").
+#
+# STATE: draft. Written by an AI agent from the titles and headings of the indexed pages.
+# The item owners must validate each question and its expected answers before the numbers
+# are used to decide anything: Lucía Ferrer (product and rules), Daniel Okafor (technical and
+# ADRs), Mei Tanaka (game content and art).
+#
+# expected: the items that should answer the question, as their key (Page Properties) or, for
+# pages without their own key, their artifact_id (confluence:<page id>). A question is a hit
+# when any expected item is among the first k distinct items returned.
+# kind: semantic (natural language) or exact (identifiers such as ADR numbers, rule IDs, keys).
+
+name: aether
+state: draft
+questions:
+  # Product and rules (owner: Lucía Ferrer)
+  - question: How long can a kill chain last between kills?
+    expected: [feature-scoring-and-chains, confluence:655393]
+    kind: semantic
+  - question: What does rule R-10 define?
+    expected: [confluence:655393, feature-scoring-and-chains]
+    kind: exact
+  - question: How many continues does a player get and what happens on game over?
+    expected: [feature-continue-and-game-over, confluence:655393]
+    kind: semantic
+  - question: How does a player choose a ship before a run?
+    expected: [feature-ship-selection, confluence:9076737]
+    kind: semantic
+  - question: How is the special weapon selected?
+    expected: [feature-special-weapon-selection, confluence:8749076]
+    kind: semantic
+  - question: What accessibility settings does the game offer?
+    expected: [feature-settings-and-accessibility, confluence:11665483]
+    kind: semantic
+  - question: Which runs are eligible for the leaderboard?
+    expected: [feature-leaderboards, confluence:655393]
+    kind: semantic
+  - question: What is the minimum age to create a player account?
+    expected: [decision-adr-016, feature-player-accounts, confluence:11698212]
+    kind: semantic
+  - question: What is out of scope for version 1.0?
+    expected: [confluence:786449]
+    kind: semantic
+  - question: How do the power levels of the main shot work?
+    expected: [confluence:8749076]
+    kind: semantic
+
+  # Game content (owner: Mei Tanaka)
+  - question: How are enemy behaviours and their parameters defined?
+    expected: [decision-adr-009, confluence:9142273]
+    kind: semantic
+  - question: How are stage segments made?
+    expected: [confluence:9076759]
+    kind: semantic
+  - question: How is concept art generated with Scenario?
+    expected: [confluence:8552471]
+    kind: semantic
+
+  # Technical and decisions (owner: Daniel Okafor)
+  - question: ADR-005
+    expected: [decision-adr-005]
+    kind: exact
+  - question: Why are scores validated on the server by replaying the run?
+    expected: [decision-adr-005]
+    kind: semantic
+  - question: Which game engine does the web client use?
+    expected: [decision-adr-007, confluence:8683561]
+    kind: semantic
+  - question: Why did we move the hosting from Azure to AWS?
+    expected: [decision-adr-011]
+    kind: semantic
+  - question: How is the infrastructure defined as code?
+    expected: [decision-adr-011, confluence:9240585]
+    kind: semantic
+  - question: What happens to runs stuck in pending validation?
+    expected: [decision-adr-010]
+    kind: semantic
+  - question: Which database stores the leaderboards?
+    expected: [decision-adr-006, decision-adr-003]
+    kind: semantic
+  - question: How is the Game API released without downtime?
+    expected: [decision-adr-013, confluence:9240585]
+    kind: semantic
+  - question: Why is there no NAT gateway or WAF at launch?
+    expected: [decision-adr-012]
+    kind: semantic
+  - question: What is the disaster recovery strategy?
+    expected: [decision-adr-014, confluence:11501570]
+    kind: semantic
+  - question: How do I run the backend on my machine?
+    expected: [decision-adr-015, confluence:11501593, confluence:11665429]
+    kind: semantic
+  - question: Which languages are supported at launch?
+    expected: [decision-adr-018, confluence:11763713]
+    kind: semantic
+  - question: Where do the product metrics come from?
+    expected: [decision-adr-017, confluence:11665514]
+    kind: semantic
+  - question: What endpoints does the Game API expose?
+    expected: [confluence:8323175]
+    kind: semantic
+  - question: What tables does the database have?
+    expected: [confluence:8192058]
+    kind: semantic
+  - question: What are the performance budgets of the client?
+    expected: [confluence:8683561, confluence:11665483]
+    kind: semantic
+  - question: What threats does the anti-cheat design address?
+    expected: [confluence:11730965, decision-adr-005]
+    kind: semantic
+  - question: What are the quality goals and the expected load?
+    expected: [confluence:10846210]
+    kind: semantic
+  - question: What is the Definition of Done?
+    expected: [confluence:851985]
+    kind: semantic
+  - question: decision-adr-019
+    expected: [decision-adr-019]
+    kind: exact
+
+  # Evidence and gaps
+  - question: What was agreed in the Stage 1 greybox playtest review?
+    expected: [meeting-2026-10-28-stage-1-greybox-playtest-review]
+    kind: semantic

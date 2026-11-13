@@ -31,6 +31,20 @@ uv run pytest -q
 
 Credentials come from the environment (`.env`, see `.env.example`) and use read-only accounts. Never commit them.
 
+## Retrieval quality
+
+```
+docker compose -f deploy/compose.yaml --profile tools run --rm pipeline eval pipelines/confluence-aether.yaml golden-set/aether.yaml --k 5
+```
+
+`golden-set/aether.yaml` is a **draft** (34 questions written by an AI agent from page titles and headings). The item owners must validate it before its numbers drive any change. Results count distinct items, and search only validated content unless `--include-drafts` is given.
+
+| Date | Corpus | Models and settings | recall@5 | MRR |
+| --- | --- | --- | --- | --- |
+| 2026-11-13 | 75 Confluence pages, 446 chunks | bge-base-en-v1.5 + Qdrant/bm25, RRF, HybridChunker max 512 tokens, no reranker | 1.000 | 0.882 |
+
+The baseline is likely optimistic, because the questions reuse the words of the titles and headings. Add questions phrased the way people really ask, before tuning anything.
+
 ## Status
 
 - [x] Increment 1: scaffold (workspace, contract, domain model, ports, layer contracts, CI)
