@@ -1,0 +1,27 @@
+# CI for the Aether knowledge platform. No network calls to sources: adapters are tested
+# against recorded responses. Runs on Azure Pipelines (the project's CI, ADR-011).
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - script: curl -LsSf https://astral.sh/uv/install.sh | sh
+    displayName: Install uv
+  - script: echo "##vso[task.prependpath]$HOME/.local/bin"
+    displayName: Add uv to PATH
+  - script: uv sync --locked
+    displayName: Sync workspace (locked)
+  - script: uv run ruff check . && uv run ruff format --check .
+    displayName: Ruff
+  - script: uv run pyright
+    displayName: Pyright
+  - script: uv run lint-imports
+    displayName: Layer contracts (import-linter)
+  - script: uv run pytest -q
+    displayName: Tests

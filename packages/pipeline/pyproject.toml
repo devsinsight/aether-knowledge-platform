@@ -1,0 +1,23 @@
+[project]
+name = "aether-pipeline"
+version = "0.1.0"
+description = "Aether knowledge ingestion pipeline: use cases, adapters and entry points"
+requires-python = ">=3.12"
+dependencies = [
+    "aether-core",
+    "docling>=2.150.0",
+    "fastembed>=0.9.1",
+    "httpx>=0.28.1",
+    "pyyaml>=6.0.3",
+    "qdrant-client>=1.20.0",
+]
+
+[project.scripts]
+aether-pipeline = "aether_pipeline.entrypoints.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+aether-core = { workspace = true }

@@ -1,0 +1,21 @@
+[project]
+name = "aether-knowledge-mcp"
+version = "0.1.0"
+description = "Aether read-only Knowledge MCP server"
+requires-python = ">=3.12"
+dependencies = [
+    "aether-core",
+    "fastembed>=0.9.1",
+    "mcp>=2.3.0",
+    "qdrant-client>=1.20.0",
+]
+
+[project.scripts]
+aether-knowledge-mcp = "aether_knowledge_mcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+aether-core = { workspace = true }

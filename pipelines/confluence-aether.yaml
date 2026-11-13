@@ -1,0 +1,10 @@
+# Pipeline definition: Confluence space AETHER -> collection "aether". No credentials here.
+name: confluence-aether
+source: confluence
+scope:
+  space: AETHER
+collection: aether
+filters:
+  max_tokens: 512   # token limit of the dense model (bge-base-en-v1.5)
+exclusions:
+  - Agent Workspace

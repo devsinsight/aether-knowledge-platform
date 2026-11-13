@@ -1,0 +1,21 @@
+{
+  "id": "8192018",
+  "type": "page",
+  "status": "current",
+  "title": "Ship Selection",
+  "version": {"number": 2},
+  "ancestors": [
+    {"id": "524397", "title": "Project Aether Home"},
+    {"id": "17104914", "title": "Section 3 - Product"},
+    {"id": "655377", "title": "04 - Features"}
+  ],
+  "body": {
+    "storage": {
+      "value": "<h1>Ship Selection</h1><p><em>Owner: Luc&iacute;a Ferrer.</em></p><h2>Summary</h2><p>At the start of a run the player chooses one of three ships.</p><ac:structured-macro ac:name=\"details\" ac:schema-version=\"1\" ac:macro-id=\"x\"><ac:rich-text-body><table><tbody><tr><th><p>Key</p></th><td><p>feature-ship-selection</p></td></tr><tr><th><p>Type</p></th><td><p>feature</p></td></tr><tr><th><p>State</p></th><td><p>draft</p></td></tr><tr><th><p>Owner</p></th><td><p>Luc&iacute;a Ferrer</p></td></tr></tbody></table></ac:rich-text-body></ac:structured-macro>"
+    },
+    "export_view": {
+      "value": "<h1>Ship Selection</h1><p><em>Owner: Lucía Ferrer.</em></p><h2>Summary</h2><p>At the start of a run the player chooses one of three ships.</p>"
+    }
+  },
+  "_links": {"webui": "/spaces/AETHER/pages/8192018/Ship+Selection"}
+}

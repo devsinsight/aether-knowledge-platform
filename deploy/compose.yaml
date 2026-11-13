@@ -1,0 +1,44 @@
+# Local deployment (platform.md, Deployment). Run from the repository root:
+#   docker compose -f deploy/compose.yaml up -d qdrant
+#   docker compose -f deploy/compose.yaml run --rm pipeline run pipelines/confluence-aether.yaml --item <page-id>
+name: aether-knowledge
+services:
+  qdrant:
+    # The Qdrant Web UI is bundled in this image: http://localhost:6333/dashboard
+    image: qdrant/qdrant:v1.20.0
+    ports: ["6333:6333"]
+    volumes: ["qdrant_storage:/qdrant/storage"]
+
+  pipeline:
+    image: aether-knowledge-platform:dev
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    profiles: ["tools"]
+    env_file: [{ path: ../.env, required: false }]
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      STATE_DB: /app/state/runs.sqlite
+    volumes: ["../state:/app/state", "model_cache:/cache"]
+    depends_on: [qdrant]
+    entrypoint: ["uv", "run", "--no-sync", "python", "-m", "aether_pipeline.entrypoints.cli"]
+
+  knowledge-mcp:
+    image: aether-knowledge-platform:dev
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    profiles: ["tools"]
+    stdin_open: true
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    volumes: ["model_cache:/cache"]
+    depends_on: [qdrant]
+    entrypoint: ["uv", "run", "--no-sync", "python", "-m", "aether_knowledge_mcp.server"]
+
+  checks:
+    image: aether-knowledge-platform:dev
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    profiles: ["tools"]
+    volumes: ["../packages:/app/packages", "../pyproject.toml:/app/pyproject.toml"]
+    entrypoint: ["sh", "-c", "uv run --no-sync ruff check . && uv run --no-sync pyright && uv run --no-sync lint-imports && uv run --no-sync pytest -q"]
+
+volumes:
+  qdrant_storage:
+  model_cache:

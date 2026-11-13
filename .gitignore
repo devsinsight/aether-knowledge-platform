@@ -1,0 +1,25 @@
+# Python and uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+dist/
+build/
+
+# Secrets and local state: never commit
+.env
+*.env
+!.env.example
+state/
+*.sqlite
+*.sqlite3
+
+# Local projection data
+qdrant_storage/
+
+# Claude Code and MCP configuration (may contain tokens)
+.claude/
+CLAUDE.local.md
+.mcp.json

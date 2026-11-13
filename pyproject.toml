@@ -1,0 +1,97 @@
+[project]
+name = "aether-knowledge-platform"
+version = "0.1.0"
+description = "Tier 2 knowledge platform for Project Aether (AIEF, ADR-019)"
+requires-python = ">=3.12"
+dependencies = ["aether-core", "aether-pipeline", "aether-knowledge-mcp"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+aether-core = { workspace = true }
+aether-pipeline = { workspace = true }
+aether-knowledge-mcp = { workspace = true }
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["aether_core", "aether_pipeline", "aether_knowledge_mcp"]
+
+[tool.pyright]
+include = ["packages"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+# The aief asset test builds kwargs with an untyped dict(); kept as-is and reported upstream.
+ignore = ["packages/core/tests/test_contract.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+addopts = "--import-mode=importlib"
+
+# Hexagonal layer contracts: copied as-is from the aief asset importlinter.toml.
+[tool.importlinter]
+root_packages = ["aether_core", "aether_pipeline", "aether_knowledge_mcp"]
+# Not in the aief asset: import-linter 2.x requires it for external forbidden modules (reported upstream).
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Core is pure: domain and ports import no application, adapters or infrastructure"
+type = "forbidden"
+source_modules = ["aether_core"]
+forbidden_modules = [
+    "aether_pipeline",
+    "aether_knowledge_mcp",
+    "llama_index",
+    "docling",
+    "fastembed",
+    "qdrant_client",
+    "httpx",
+    "fastapi",
+    "mcp",
+]
+allow_indirect_imports = false
+
+[[tool.importlinter.contracts]]
+name = "Use cases depend on ports, never on adapters, entry points or infrastructure"
+type = "forbidden"
+source_modules = ["aether_pipeline.application"]
+forbidden_modules = [
+    "aether_pipeline.adapters",
+    "aether_pipeline.entrypoints",
+    "llama_index",
+    "docling",
+    "fastembed",
+    "qdrant_client",
+    "httpx",
+    "fastapi",
+    "mcp",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters never call entry points"
+type = "forbidden"
+source_modules = ["aether_pipeline.adapters"]
+forbidden_modules = ["aether_pipeline.entrypoints"]
+
+[[tool.importlinter.contracts]]
+name = "Knowledge MCP is isolated from the pipeline"
+type = "forbidden"
+source_modules = ["aether_knowledge_mcp"]
+forbidden_modules = ["aether_pipeline"]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.16",
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
