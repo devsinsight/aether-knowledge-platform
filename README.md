@@ -41,9 +41,9 @@ docker compose -f deploy/compose.yaml --profile tools run --rm pipeline eval pip
 
 | Date | Corpus | Models and settings | recall@5 | MRR |
 | --- | --- | --- | --- | --- |
-| 2026-11-13 | 75 Confluence pages, 446 chunks | bge-base-en-v1.5 + Qdrant/bm25, RRF, HybridChunker max 512 tokens, no reranker | 1.000 | 0.882 |
+| 2026-11-13 | 75 Confluence pages, 446 chunks | bge-base-en-v1.5 + Qdrant/bm25, RRF, HybridChunker max 512 tokens, no reranker | 1.000 | 0.897 (0.882 in the first run) |
 
-The baseline is likely optimistic, because the questions reuse the words of the titles and headings. Add questions phrased the way people really ask, before tuning anything.
+Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2026-11-13.md). The baseline is likely optimistic, because the questions reuse the words of the titles and headings. Add questions phrased the way people really ask, before tuning anything.
 
 ## Status
 
