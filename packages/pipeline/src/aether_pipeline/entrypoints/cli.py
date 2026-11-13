@@ -60,9 +60,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Heavy adapters are imported only when a run is wired.
     from aether_pipeline.adapters.confluence import ConfluenceReader
-    from aether_pipeline.adapters.docling_chunker import DoclingChunker
-    from aether_pipeline.adapters.fastembed_embedder import FastEmbedEmbedder
-    from aether_pipeline.adapters.qdrant_store import QdrantStore
+    from aether_pipeline.adapters.llamaindex_chunker import LlamaIndexDoclingChunker
+    from aether_pipeline.adapters.llamaindex_embedder import LlamaIndexFastEmbedEmbedder
+    from aether_pipeline.adapters.llamaindex_qdrant_store import LlamaIndexQdrantStore
     from aether_pipeline.adapters.sqlite_runs import SqliteRunRepository
     from aether_pipeline.application.run_pipeline import RunPipeline
 
@@ -72,9 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         reader=ConfluenceReader(
             _require("CONFLUENCE_BASE_URL"), _require("CONFLUENCE_EMAIL"), _require("CONFLUENCE_API_TOKEN")
         ),
-        chunker=DoclingChunker(tokenizer_model=dense, max_tokens=int(settings.get("max_tokens", 512))),
-        embedder=FastEmbedEmbedder(dense, os.environ.get("SPARSE_MODEL", "Qdrant/bm25")),
-        store=QdrantStore(os.environ.get("QDRANT_URL", "http://localhost:6333")),
+        chunker=LlamaIndexDoclingChunker(
+            tokenizer_model=dense, max_tokens=int(settings.get("max_tokens", 512))
+        ),
+        embedder=LlamaIndexFastEmbedEmbedder(dense, os.environ.get("SPARSE_MODEL", "Qdrant/bm25")),
+        store=LlamaIndexQdrantStore(os.environ.get("QDRANT_URL", "http://localhost:6333")),
         runs=SqliteRunRepository(Path(os.environ.get("STATE_DB", "state/runs.sqlite"))),
     )
     result = use_case.execute(definition, args.item)

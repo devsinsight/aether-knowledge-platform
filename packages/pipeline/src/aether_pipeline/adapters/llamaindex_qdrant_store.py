@@ -1,22 +1,38 @@
-"""Qdrant projection: named dense vector + sparse vector with IDF, payload indexes, hybrid RRF search."""
+"""Qdrant projection loaded through LlamaIndex's QdrantVectorStore.
+
+The collection is created here first (named dense vector, sparse vector with IDF, collection metadata
+and keyword payload indexes), so LlamaIndex finds it and never applies its own defaults. Points are
+written by QdrantVectorStore.add with hybrid enabled and the vector names "dense" and "sparse".
+
+Contract guarantees kept on top of LlamaIndex:
+- the node ID is the contract's deterministic point ID (idempotency and rebuild);
+- the node metadata is the contract payload, nested (flat_metadata=False), so filters keep working;
+- the sparse vectors are the ones the Embedder already computed, handed over through sparse_doc_fn.
+
+Deleting old versions and hybrid search use the Qdrant client: LlamaIndex has no "delete every version
+but this one", and the Knowledge MCP queries Qdrant directly.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
+from llama_index.core.schema import BaseNode, TextNode
+from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
 
 from aether_core.domain.contract import Chunk
-from aether_core.ports import Embedding, SearchHit
+from aether_core.ports import Embedding, SearchHit, SparseVector
 
 DENSE, SPARSE = "dense", "sparse"
 INDEXED_FIELDS = ("artifact_id", "key", "section", "artifact_type", "lifecycle.state", "source.version")
 
 
-class QdrantStore:
+class LlamaIndexQdrantStore:
     def __init__(self, url: str, client: QdrantClient | None = None) -> None:
         self._client = client or QdrantClient(url=url)
+        self._pending: dict[str, SparseVector] = {}
 
     def ensure_collection(self, name: str, model_info: dict[str, Any]) -> None:
         if self._client.collection_exists(name):
@@ -33,21 +49,14 @@ class QdrantStore:
             self._client.create_payload_index(name, field, models.PayloadSchemaType.KEYWORD)
 
     def upsert(self, collection: str, chunks: Sequence[Chunk], embeddings: Sequence[Embedding]) -> None:
-        points = [
-            models.PointStruct(
-                id=chunk.point_id,
-                vector={
-                    DENSE: list(emb.dense),
-                    SPARSE: models.SparseVector(
-                        indices=list(emb.sparse.indices), values=list(emb.sparse.values)
-                    ),
-                },
-                payload=chunk.payload(),
-            )
-            for chunk, emb in zip(chunks, embeddings, strict=True)
-        ]
-        if points:
-            self._client.upsert(collection, points=points, wait=True)
+        if not chunks:
+            return
+        nodes: list[BaseNode] = [_node(chunk, emb) for chunk, emb in zip(chunks, embeddings, strict=True)]
+        self._pending = {node.get_content(): emb.sparse for node, emb in zip(nodes, embeddings, strict=True)}
+        try:
+            self._vector_store(collection).add(nodes)
+        finally:
+            self._pending = {}
 
     def delete_artifact(self, collection: str, artifact_id: str, keep_version: str | None = None) -> None:
         must_not: list[models.Condition] | None = (
@@ -65,6 +74,34 @@ class QdrantStore:
         self, collection: str, query: Embedding, limit: int, filters: dict[str, Any] | None = None
     ) -> Sequence[SearchHit]:
         return search(self._client, collection, query, limit, filters)
+
+    def _vector_store(self, collection: str) -> QdrantVectorStore:
+        return QdrantVectorStore(
+            collection_name=collection,
+            client=self._client,
+            enable_hybrid=True,
+            dense_vector_name=DENSE,
+            sparse_vector_name=SPARSE,
+            sparse_doc_fn=self._precomputed_sparse,
+            flat_metadata=False,
+        )
+
+    def _precomputed_sparse(self, texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
+        vectors = [self._pending[text] for text in texts]
+        return [list(v.indices) for v in vectors], [list(v.values) for v in vectors]
+
+
+def _node(chunk: Chunk, embedding: Embedding) -> TextNode:
+    payload = chunk.payload()
+    return TextNode(
+        id_=chunk.point_id,
+        text=chunk.text,
+        embedding=list(embedding.dense),
+        metadata=payload,
+        # The embedded and sparse-encoded text is the chunk text alone, never the metadata.
+        excluded_embed_metadata_keys=list(payload),
+        excluded_llm_metadata_keys=list(payload),
+    )
 
 
 def search(

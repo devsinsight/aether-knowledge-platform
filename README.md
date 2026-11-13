@@ -9,7 +9,7 @@ Decision: ADR-019 *Tier 2 Knowledge Platform with the Framework Defaults* (Confl
 | Path | Contents |
 | --- | --- |
 | `packages/core` (`aether_core`) | Domain: contract v2 (`domain/contract.py`, copied from the aief asset), pipeline model, ports. No infrastructure |
-| `packages/pipeline` (`aether_pipeline`) | `application/` use cases, `adapters/` outbound adapters, `entrypoints/` CLI, webhooks, Ops MCP and the composition root |
+| `packages/pipeline` (`aether_pipeline`) | `application/` use cases, `adapters/` outbound adapters (LlamaIndex is the ingestion engine: DoclingNodeParser, FastEmbedEmbedding, QdrantVectorStore), `entrypoints/` CLI, webhooks, Ops MCP and the composition root |
 | `packages/knowledge-mcp` (`aether_knowledge_mcp`) | Read-only Knowledge MCP; never imports the pipeline |
 | `pipelines/` | Pipeline definitions (YAML); no credentials |
 | `golden-set/` | Retrieval questions and expected keys |
@@ -34,4 +34,4 @@ Credentials come from the environment (`.env`, see `.env.example`) and use read-
 ## Status
 
 - [x] Increment 1: scaffold (workspace, contract, domain model, ports, layer contracts, CI)
-- [ ] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency and search (2026-11-13); live rebuild pending
+- [ ] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency, rebuild and validated-only search (2026-11-13), also after moving the adapters to LlamaIndex
