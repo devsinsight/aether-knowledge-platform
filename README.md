@@ -37,7 +37,7 @@ Credentials come from the environment (`.env`, see `.env.example`) and use read-
 docker compose -f deploy/compose.yaml --profile tools run --rm pipeline eval pipelines/confluence-aether.yaml golden-set/aether.yaml --k 5
 ```
 
-`golden-set/aether.yaml` is a **draft** (34 questions written by an AI agent from page titles and headings). The item owners must validate it before its numbers drive any change. Results count distinct items, and search only validated content unless `--include-drafts` is given.
+`golden-set/aether.yaml` is **validated** (34 questions written by an AI agent from page titles and headings, approved on 2026-11-13 by the project owner on behalf of the item owners, Azure Boards #102–#104). Results count distinct items, and search only validated content unless `--include-drafts` is given.
 
 | Date | Corpus | Models and settings | recall@5 | MRR |
 | --- | --- | --- | --- | --- |

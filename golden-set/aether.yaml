@@ -1,9 +1,11 @@
 # Golden set for retrieval quality (verification.md, "Retrieval quality: the golden set").
 #
-# STATE: draft. Written by an AI agent from the titles and headings of the indexed pages.
-# The item owners must validate each question and its expected answers before the numbers
-# are used to decide anything: Lucía Ferrer (product and rules), Daniel Okafor (technical and
-# ADRs), Mei Tanaka (game content and art).
+# STATE: validated (2026-11-13) by the project owner. Aether is a reference project used only to
+# validate the AI Engineering Framework, so the project owner approved the questions on behalf of
+# the item owners (Lucía Ferrer, product and rules; Daniel Okafor, technical and ADRs; Mei Tanaka,
+# game content and art). Azure Boards tasks #102, #103 and #104 record the approval.
+# The questions were written by an AI agent from the titles and headings of the indexed pages,
+# so the baseline is still likely optimistic (see report-2026-11-13.md).
 #
 # expected: the items that should answer the question, as their key (Page Properties) or, for
 # pages without their own key, their artifact_id (confluence:<page id>). A question is a hit
@@ -11,7 +13,7 @@
 # kind: semantic (natural language) or exact (identifiers such as ADR numbers, rule IDs, keys).
 
 name: aether
-state: draft
+state: validated
 questions:
   # Product and rules (owner: Lucía Ferrer)
   - question: How long can a kill chain last between kills?
