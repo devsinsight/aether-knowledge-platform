@@ -108,3 +108,52 @@ def preview_sync():
     from aether_pipeline.application.preview_sync import PreviewSync
 
     return PreviewSync(reader(), state())
+
+
+# Publisher: the only service with wiki write access (an account limited to the Work Records tree).
+
+
+@cache
+def wiki_publisher():
+    from aether_pipeline.adapters.confluence_publisher import ConfluenceWikiPublisher
+
+    return ConfluenceWikiPublisher(
+        require("CONFLUENCE_BASE_URL"),
+        require("CONFLUENCE_WRITE_EMAIL"),
+        require("CONFLUENCE_WRITE_API_TOKEN"),
+        os.environ.get("CONFLUENCE_SPACE", "AETHER"),
+    )
+
+
+@cache
+def sync_requester():
+    from aether_pipeline.adapters.sync_client import HttpSyncRequester
+
+    return HttpSyncRequester(os.environ.get("SYNC_URL", "http://sync:8081"))
+
+
+def publish_work_record():
+    from aether_pipeline.adapters.azure_devops import AzureDevOpsWorkItems
+    from aether_pipeline.adapters.secret_scanner import RegexSecretScanner
+    from aether_pipeline.adapters.work_record_files import MountedWorkRecordFiles
+    from aether_pipeline.application.publish_work_record import PublishWorkRecord
+
+    return PublishWorkRecord(
+        files=MountedWorkRecordFiles(Path(os.environ.get("WORK_RECORDS_DIR", "work-records"))),
+        wiki=wiki_publisher(),
+        work_items=AzureDevOpsWorkItems(
+            os.environ.get("ADO_ORG_URL", "https://dev.azure.com/devsinsight"),
+            os.environ.get("ADO_PROJECT", "Aether"),
+            require("ADO_READ_PAT"),
+        ),
+        scanner=RegexSecretScanner(),
+        sync=sync_requester(),
+        runs=runs(),
+        parent_page_id=require("WORK_RECORDS_PARENT_PAGE_ID"),
+    )
+
+
+def validate_work_record():
+    from aether_pipeline.application.publish_work_record import ValidateWorkRecord
+
+    return ValidateWorkRecord(wiki_publisher(), sync_requester())

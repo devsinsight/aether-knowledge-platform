@@ -111,6 +111,70 @@ class RunRepository(Protocol):
     def latest(self, pipeline: str) -> PipelineRun | None: ...
 
 
+@dataclass(frozen=True)
+class RawWorkRecord:
+    front_matter: dict[str, Any]
+    body: str
+
+
+class WorkRecordFiles(Protocol):
+    """Work record files in the folder mounted read-only into the publisher."""
+
+    def read(self, path: str) -> RawWorkRecord:
+        """Raises WorkRecordRejectedError for a path outside the folder or a file without front matter."""
+        ...
+
+
+@dataclass(frozen=True)
+class PublishedPage:
+    page_id: str
+    version: int
+    title: str
+    url: str
+    properties: dict[str, str]
+
+
+class WikiPublisher(Protocol):
+    """Writes work record pages through the wiki's REST API (LlamaIndex has no writers)."""
+
+    def find_page(self, title: str) -> PublishedPage | None: ...
+
+    def ensure_parent(self, parent_id: str, title: str) -> str:
+        """The ID of the child page with this title under parent_id, created empty if missing."""
+        ...
+
+    def create_or_update(
+        self,
+        parent_id: str,
+        title: str,
+        body_markdown: str,
+        properties: dict[str, str],
+        expected_version: int | None,
+    ) -> PublishedPage:
+        """Create the page, or update it when expected_version (optimistic concurrency) still holds."""
+        ...
+
+    def set_properties(self, page: PublishedPage, properties: dict[str, str], note: str) -> PublishedPage:
+        """Replace the Page Properties and add a note to the Validation section; body otherwise kept."""
+        ...
+
+
+class WorkItemLookup(Protocol):
+    def exists(self, work_item_id: int) -> bool: ...
+
+
+class SecretScanner(Protocol):
+    def scan(self, text: str) -> list[str]:
+        """Names of the secret patterns found (never the secret itself)."""
+        ...
+
+
+class SyncRequester(Protocol):
+    def sync_items(self, item_ids: Sequence[str], trigger: str) -> str:
+        """Ask the sync service to process these items; returns the run ID."""
+        ...
+
+
 class StateStore(Protocol):
     """Last indexed version and chunk hashes per item. Derived state: rebuildable from the projection."""
 

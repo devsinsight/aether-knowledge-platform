@@ -7,6 +7,7 @@
 #   ../.env                 sync and pipeline: read-only Confluence account, Qdrant admin key
 #   ../.env.qdrant          qdrant: admin and read-only API keys
 #   ../.env.knowledge-mcp   knowledge-mcp: the Qdrant READ-ONLY key only
+#   ../.env.publisher       publisher: wiki write account (Work Records only), read-only Azure Boards PAT
 # Every file is optional: without keys, Qdrant runs without authentication (local only).
 name: aether-knowledge
 services:
@@ -30,6 +31,22 @@ services:
     depends_on: [qdrant]
     restart: unless-stopped
     command: ["aether-pipeline", "serve", "pipelines/confluence-aether.yaml", "--port", "8081"]
+
+  # Work records: Markdown file (by path) -> wiki page -> sync of that page. The only service with wiki
+  # write access (an account limited to the Work Records tree); internal API, no host port.
+  publisher:
+    image: aether-knowledge-platform:dev
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    env_file: [{ path: ../.env.publisher, required: false }]
+    environment:
+      SYNC_URL: http://sync:8081
+      WORK_RECORDS_DIR: /work-records
+      STATE_DB: /app/state/runs.sqlite
+      PYTHONUNBUFFERED: "1"
+    volumes: ["../work-records:/work-records:ro", "../state:/app/state"]
+    depends_on: [sync]
+    restart: unless-stopped
+    command: ["aether-pipeline", "publisher", "serve", "--port", "8090"]
 
   # One-off CLI runs (run, eval, state rebuild): docker compose ... run --rm pipeline <command>
   pipeline:
@@ -55,6 +72,7 @@ services:
     environment:
       QDRANT_URL: http://qdrant:6333
       SYNC_URL: http://sync:8081
+      PUBLISHER_URL: http://publisher:8090
     volumes: ["model_cache:/cache"]
     depends_on: [qdrant]
     entrypoint: ["aether-knowledge-mcp"]

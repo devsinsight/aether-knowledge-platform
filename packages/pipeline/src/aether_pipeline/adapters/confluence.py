@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from aether_core.domain.contract import Authority, Source, normalize
+from aether_core.domain.contract import Authority, Relationship, Source, normalize
 from aether_core.domain.sections import section_from_ancestors
 from aether_core.domain.sync import ListedItem
 from aether_core.ports import SourceItem
@@ -77,6 +77,17 @@ def parse_page_properties(storage: str) -> dict[str, str]:
     return parser.properties
 
 
+def relationships_from(props: dict[str, str]) -> tuple[Relationship, ...]:
+    """Keys a page declares in its Page Properties (work records: Story and Feature)."""
+    found: list[Relationship] = []
+    story = props.get("story", "").split("(")[0].strip()
+    if story:
+        found.append(Relationship("work_record_of", story))
+    if props.get("feature"):
+        found.append(Relationship("part_of", props["feature"].strip()))
+    return tuple(found)
+
+
 def map_page(page: dict[str, Any], base_url: str) -> SourceItem:
     """Map a Confluence REST content response (with body, version and ancestors) to the contract."""
     props = parse_page_properties(page["body"]["storage"]["value"])
@@ -98,6 +109,7 @@ def map_page(page: dict[str, Any], base_url: str) -> SourceItem:
         section=section_from_ancestors(ancestors),
         state=props.get("state"),
         archived_at_source=page.get("status") == "archived",
+        relationships=relationships_from(props),
     )
     return SourceItem(artifact=artifact, ancestor_titles=ancestors)
 

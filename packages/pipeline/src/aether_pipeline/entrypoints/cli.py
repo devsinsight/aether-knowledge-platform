@@ -6,11 +6,16 @@ sync <pipeline.yaml>                            apply them (incremental mode) an
 state rebuild <pipeline.yaml>                   rebuild the state store from the projection
 serve <pipeline.yaml> [--port 8081]             internal sync API (compose network only)
 eval <pipeline.yaml> <golden-set.yaml>          recall@k and MRR
+publisher publish <path>                        publish a work record file (by path) to the wiki
+publisher validate <story> --pr <url> --by <name>   a person or CI approves the record
+publisher status <story>                        the published record of a story
+publisher serve [--port 8090]                   internal publisher API (compose network only)
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -49,8 +54,24 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--k", type=int, default=5)
     evaluate.add_argument("--include-drafts", action="store_true", help="Search drafts too")
 
+    publisher = sub.add_parser("publisher", help="Work records: publish to the wiki, validate, serve")
+    actions = publisher.add_subparsers(dest="action", required=True)
+    publish = actions.add_parser("publish", help="Publish a work record file by path")
+    publish.add_argument("path")
+    validate = actions.add_parser("validate", help="Mark a story's work record as validated (a person or CI)")
+    validate.add_argument("story", help="Story key")
+    validate.add_argument("--pr", required=True, help="URL of the merged pull request")
+    validate.add_argument("--by", required=True, help="Who validates")
+    status = actions.add_parser("status", help="The published work record of a story")
+    status.add_argument("story")
+    publisher_serve = actions.add_parser("serve", help="Internal publisher API for the compose network")
+    publisher_serve.add_argument("--host", default="0.0.0.0")
+    publisher_serve.add_argument("--port", type=int, default=8090)
+
     args = parser.parse_args(argv)
     wiring.load_env(Path(".env"))
+    if args.command == "publisher":
+        return _publisher(args)
     definition = wiring.load_definition(args.pipeline)
 
     if args.command == "eval":
@@ -120,6 +141,25 @@ def print_run(run: PipelineRun) -> None:
             )
         if not affected.related:
             print("    no related items found")
+
+
+def _publisher(args: argparse.Namespace) -> int:
+    from aether_pipeline.entrypoints.publisher_api import PublisherService
+
+    service = PublisherService(wiring.publish_work_record, wiring.validate_work_record, wiring.wiki_publisher)
+    if args.action == "serve":
+        from aether_pipeline.entrypoints.publisher_api import serve as serve_api
+
+        serve_api(service, args.host, args.port)
+        return 0
+    if args.action == "publish":
+        status, result = service.publish(args.path, trigger="cli")
+    elif args.action == "validate":
+        status, result = service.validate(args.story, args.pr, args.by)
+    else:
+        status, result = service.status(args.story)
+    print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
+    return 0 if status < 400 else 1
 
 
 def load_golden_set(path: Path) -> list[GoldenQuestion]:
