@@ -1,100 +1,125 @@
-"""CLI and composition root: ``aether-pipeline run <pipeline.yaml> --item <page-id> [--item ...]``.
+"""CLI ``aether-pipeline``. Wiring is in ``wiring``; credentials come from the environment.
 
-Wiring happens only here. Credentials come from the environment (or a local ``.env``), never from
-the pipeline definition.
+run <pipeline.yaml> --item <id> [--item ...]   ingest the given items
+sync <pipeline.yaml> --preview                  new, changed and deleted items; changes nothing
+sync <pipeline.yaml>                            apply them (incremental mode) and report affected context
+state rebuild <pipeline.yaml>                   rebuild the state store from the projection
+serve <pipeline.yaml> [--port 8081]             internal sync API (compose network only)
+eval <pipeline.yaml> <golden-set.yaml>          recall@k and MRR
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 import yaml
 
-from aether_core.domain.pipeline import AGENT_WORKSPACE_TITLE, PipelineDefinition
+from aether_core.domain.pipeline import PipelineDefinition, PipelineRun
+from aether_core.domain.sync import SyncPlan
 from aether_pipeline.application.evaluate_retrieval import EvaluateRetrieval, GoldenQuestion
-
-
-def load_env(path: Path) -> None:
-    """Load KEY=VALUE lines from a local .env without overriding the real environment."""
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
-
-
-def load_definition(path: Path) -> PipelineDefinition:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return PipelineDefinition(
-        name=data["name"],
-        source=data["source"],
-        scope=dict(data.get("scope", {})),
-        collection=data["collection"],
-        filters=dict(data.get("filters", {})),
-        exclusions=tuple(data.get("exclusions", [AGENT_WORKSPACE_TITLE])),
-        schedule=data.get("schedule"),
-    )
-
-
-def _require(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        sys.exit(f"Missing environment variable {name} (see .env.example)")
-    return value
+from aether_pipeline.entrypoints import wiring
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aether-pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
+
     run = sub.add_parser("run", help="Run a pipeline for one or more items")
     run.add_argument("pipeline", type=Path)
     run.add_argument("--item", action="append", required=True, help="Source item ID (repeatable)")
+
+    sync = sub.add_parser("sync", help="Incremental sync: preview, then run")
+    sync.add_argument("pipeline", type=Path)
+    sync.add_argument("--preview", action="store_true", help="Show the plan; change nothing")
+
+    state = sub.add_parser("state", help="State store maintenance")
+    state.add_argument("action", choices=["rebuild"])
+    state.add_argument("pipeline", type=Path)
+
+    serve = sub.add_parser("serve", help="Internal sync API for the compose network")
+    serve.add_argument("pipeline", type=Path)
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8081)
+
     evaluate = sub.add_parser("eval", help="Measure retrieval with a golden set (recall@k, MRR)")
     evaluate.add_argument("pipeline", type=Path)
     evaluate.add_argument("golden_set", type=Path)
     evaluate.add_argument("--k", type=int, default=5)
     evaluate.add_argument("--include-drafts", action="store_true", help="Search drafts too")
-    args = parser.parse_args(argv)
 
-    load_env(Path(".env"))
-    definition = load_definition(args.pipeline)
+    args = parser.parse_args(argv)
+    wiring.load_env(Path(".env"))
+    definition = wiring.load_definition(args.pipeline)
+
     if args.command == "eval":
         return _evaluate(definition, args.golden_set, args.k, args.include_drafts)
+    if args.command == "state":
+        from aether_pipeline.application.rebuild_state import RebuildState
 
-    # Heavy adapters are imported only when a run is wired.
-    from aether_pipeline.adapters.confluence import ConfluenceReader
-    from aether_pipeline.adapters.llamaindex_chunker import LlamaIndexDoclingChunker
-    from aether_pipeline.adapters.llamaindex_embedder import LlamaIndexFastEmbedEmbedder
-    from aether_pipeline.adapters.llamaindex_qdrant_store import LlamaIndexQdrantStore
-    from aether_pipeline.adapters.sqlite_runs import SqliteRunRepository
-    from aether_pipeline.application.run_pipeline import RunPipeline
+        count = RebuildState(wiring.store(), wiring.state()).execute(definition.name, definition.collection)
+        print(f"state store rebuilt from collection {definition.collection!r}: {count} items")
+        return 0
+    if args.command == "serve":
+        from aether_pipeline.entrypoints.sync_api import SyncService
+        from aether_pipeline.entrypoints.sync_api import serve as serve_api
 
-    settings = definition.filters
-    dense = os.environ.get("DENSE_MODEL", "BAAI/bge-base-en-v1.5")
-    use_case = RunPipeline(
-        reader=ConfluenceReader(
-            _require("CONFLUENCE_BASE_URL"), _require("CONFLUENCE_EMAIL"), _require("CONFLUENCE_API_TOKEN")
-        ),
-        chunker=LlamaIndexDoclingChunker(
-            tokenizer_model=dense, max_tokens=int(settings.get("max_tokens", 512))
-        ),
-        embedder=LlamaIndexFastEmbedEmbedder(dense, os.environ.get("SPARSE_MODEL", "Qdrant/bm25")),
-        store=LlamaIndexQdrantStore(os.environ.get("QDRANT_URL", "http://localhost:6333")),
-        runs=SqliteRunRepository(Path(os.environ.get("STATE_DB", "state/runs.sqlite"))),
-    )
-    result = use_case.execute(definition, args.item)
+        service = SyncService(
+            definition, wiring.preview_sync, lambda: wiring.run_pipeline(definition), wiring.runs()
+        )
+        serve_api(service, args.host, args.port)
+        return 0
+    if args.command == "sync" and args.preview:
+        print_plan(wiring.preview_sync().execute(definition))
+        return 0
 
-    print(f"run {result.run_id}: {result.status}")
-    for step in result.steps:
-        print(f"  {step.step:<8} processed={step.processed} failed={step.failed}")
-    for error in result.errors:
-        print(f"  ERROR {error.step} item={error.item}: {error.message}")
+    pipeline = wiring.run_pipeline(definition)
+    if args.command == "sync":
+        result = pipeline.execute(definition, mode="incremental", trigger="cli")
+    else:
+        result = pipeline.execute(definition, args.item)
+    print_run(result)
     return 0 if result.status == "succeeded" else 1
+
+
+def print_plan(plan: SyncPlan) -> None:
+    print(
+        f"plan: new={len(plan.new)} changed={len(plan.changed)} deleted={len(plan.deleted)}"
+        f" unchanged={len(plan.unchanged)}"
+    )
+    for label, items in (("new", plan.new), ("changed", plan.changed), ("deleted", plan.deleted)):
+        for item in items:
+            print(f"  {label:<8} {item}")
+    if plan.is_empty:
+        print("  nothing to do")
+
+
+def print_run(run: PipelineRun) -> None:
+    print(f"run {run.run_id} ({run.mode}): {run.status}")
+    totals: dict[str, list[int]] = {}
+    for step in run.steps:
+        total = totals.setdefault(step.step, [0, 0, 0])
+        total[0] += step.processed
+        total[1] += step.failed
+        total[2] += step.reused
+    print(f"  items={len(run.items)} deleted={len(run.deleted)}")
+    for name, (processed, failed, reused) in totals.items():
+        extra = f" reused={reused}" if name == "embed" else ""
+        print(f"  {name:<8} processed={processed} failed={failed}{extra}")
+    for error in run.errors:
+        print(f"  ERROR {error.step} item={error.item}: {error.message}")
+    for affected in run.affected:
+        label = affected.key or affected.title
+        print(f"  affected by {affected.kind} {label} (terms: {', '.join(affected.terms) or '-'}):")
+        for related in affected.related:
+            owner = related.owner or "no owner"
+            print(
+                f"    {related.key or related.artifact_id}  {related.title}  [{owner}]"
+                f"  via {', '.join(related.terms)}"
+            )
+        if not affected.related:
+            print("    no related items found")
 
 
 def load_golden_set(path: Path) -> list[GoldenQuestion]:
@@ -106,14 +131,7 @@ def load_golden_set(path: Path) -> list[GoldenQuestion]:
 
 
 def _evaluate(definition: PipelineDefinition, golden_set: Path, k: int, include_drafts: bool) -> int:
-    from aether_pipeline.adapters.llamaindex_embedder import LlamaIndexFastEmbedEmbedder
-    from aether_pipeline.adapters.llamaindex_qdrant_store import LlamaIndexQdrantStore
-
-    dense = os.environ.get("DENSE_MODEL", "BAAI/bge-base-en-v1.5")
-    use_case = EvaluateRetrieval(
-        LlamaIndexFastEmbedEmbedder(dense, os.environ.get("SPARSE_MODEL", "Qdrant/bm25")),
-        LlamaIndexQdrantStore(os.environ.get("QDRANT_URL", "http://localhost:6333")),
-    )
+    use_case = EvaluateRetrieval(wiring.embedder(), wiring.store())
     filters = None if include_drafts else {"lifecycle.state": ["validated"]}
     report = use_case.execute(definition.collection, load_golden_set(golden_set), k, filters)
     for r in report.results:
@@ -126,4 +144,5 @@ def _evaluate(definition: PipelineDefinition, golden_set: Path, k: int, include_
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("PYTHONUNBUFFERED", "1")
     raise SystemExit(main())

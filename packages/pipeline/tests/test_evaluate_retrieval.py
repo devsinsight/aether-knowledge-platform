@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from aether_core.domain.contract import Chunk
-from aether_core.ports import Embedding, SearchHit, SparseVector
+from aether_core.ports import Embedding, SearchHit, SparseVector, StoredPoint
 from aether_pipeline.application.evaluate_retrieval import EvaluateRetrieval, GoldenQuestion
 
 QUERY = Embedding((1.0,), SparseVector((), ()))
@@ -34,6 +34,17 @@ class FakeStore:
     def upsert(self, collection: str, chunks: Sequence[Chunk], embeddings: Sequence[Embedding]) -> None: ...
 
     def delete_artifact(self, collection: str, artifact_id: str, keep_version: str | None = None) -> None: ...
+
+    def delete_points(self, collection: str, point_ids: Sequence[str]) -> None: ...
+
+    def get_points(self, collection: str, point_ids: Sequence[str]) -> Sequence[StoredPoint]:
+        return []
+
+    def find_mentions(self, collection: str, term: str, limit: int = 256) -> Sequence[dict[str, Any]]:
+        return []
+
+    def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:
+        return []
 
     def search(
         self, collection: str, query: Embedding, limit: int, filters: dict[str, Any] | None = None

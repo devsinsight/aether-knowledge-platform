@@ -6,7 +6,9 @@ import copy
 import json
 from pathlib import Path
 
-from aether_pipeline.adapters.confluence import map_page, parse_page_properties
+import httpx
+
+from aether_pipeline.adapters.confluence import ConfluenceReader, map_page, parse_page_properties
 
 BASE = "https://devsinsight.atlassian.net/wiki"
 PAGE = json.loads(
@@ -63,3 +65,29 @@ def test_nested_macros_inside_details_do_not_end_it_early() -> None:
         "</tbody></table></ac:rich-text-body></ac:structured-macro>"
     )
     assert parse_page_properties(storage) == {"key": "decision-adr-019", "state": "validated"}
+
+
+def test_list_versions_pages_through_the_space_without_bodies() -> None:
+    def page_json(i: int) -> dict[str, object]:
+        return {
+            "id": str(i),
+            "title": f"Page {i}",
+            "version": {"number": i % 3 + 1},
+            "ancestors": [{"title": "Home"}],
+        }
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        start = int(request.url.params["start"])
+        results = [page_json(i) for i in range(start, min(start + 100, 130))]
+        links = {"next": "/rest/api/content?start=100"} if start == 0 else {}
+        return httpx.Response(200, json={"results": results, "size": len(results), "_links": links})
+
+    reader = ConfluenceReader(BASE, "u", "t", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    items = list(reader.list_versions({"space": "AETHER"}))
+    assert len(items) == 130 and items[0].version == "1" and items[0].ancestor_titles == ("Home",)
+    assert [r.url.params["start"] for r in requests] == ["0", "100"]
+    assert "body" not in requests[0].url.params["expand"]
+    assert requests[0].url.params["status"] == "current"

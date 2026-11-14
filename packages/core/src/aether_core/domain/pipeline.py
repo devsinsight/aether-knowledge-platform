@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
+from aether_core.domain.sync import AffectedContext
+
 RunMode = Literal["full", "incremental", "single_item"]
 RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 Step = Literal["extract", "normalize", "parse", "chunk", "enrich", "embed", "load", "delete", "verify"]
@@ -41,6 +43,8 @@ class StepResult:
     step: Step
     processed: int = 0
     failed: int = 0
+    reused: int = 0  # embed step: embeddings taken from the previous version instead of computed
+    item: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,8 @@ class PipelineRun:
     steps: tuple[StepResult, ...] = ()
     errors: tuple[RunError, ...] = ()
     items: tuple[str, ...] = ()
+    deleted: tuple[str, ...] = ()
+    affected: tuple[AffectedContext, ...] = ()
 
     def start(self) -> PipelineRun:
         return replace(self, status="running", started_at=datetime.now(UTC))
@@ -66,11 +72,16 @@ class PipelineRun:
         """Failed items are recorded, never hidden."""
         return replace(self, errors=(*self.errors, error))
 
+    def report(self, affected: tuple[AffectedContext, ...]) -> PipelineRun:
+        return replace(self, affected=affected)
+
     def finish(self) -> PipelineRun:
         status: RunStatus = "failed" if self.errors else "succeeded"
         return replace(self, status=status, finished_at=datetime.now(UTC))
 
 
-def is_excluded(ancestor_titles: tuple[str, ...], definition: PipelineDefinition) -> bool:
-    """True when the item sits under an excluded subtree (for example the Agent Workspace)."""
-    return any(title in definition.exclusions for title in ancestor_titles)
+def is_excluded(
+    ancestor_titles: tuple[str, ...], definition: PipelineDefinition, title: str | None = None
+) -> bool:
+    """True when the item is, or sits under, an excluded subtree (for example the Agent Workspace)."""
+    return title in definition.exclusions or any(t in definition.exclusions for t in ancestor_titles)

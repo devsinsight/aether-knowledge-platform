@@ -51,6 +51,7 @@ source = { editable = "packages/knowledge-mcp" }
 dependencies = [
     { name = "aether-core" },
     { name = "fastembed" },
+    { name = "httpx" },
     { name = "mcp" },
     { name = "qdrant-client" },
 ]
@@ -59,6 +60,7 @@ dependencies = [
 requires-dist = [
     { name = "aether-core", editable = "packages/core" },
     { name = "fastembed", specifier = ">=0.9.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "qdrant-client", specifier = ">=1.20.0" },
 ]

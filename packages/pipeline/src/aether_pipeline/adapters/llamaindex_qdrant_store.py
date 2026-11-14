@@ -15,23 +15,23 @@ but this one", and the Knowledge MCP queries Qdrant directly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Iterable, Sequence
+from typing import Any, cast
 
 from llama_index.core.schema import BaseNode, TextNode
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
 
 from aether_core.domain.contract import Chunk
-from aether_core.ports import Embedding, SearchHit, SparseVector
+from aether_core.ports import Embedding, SearchHit, SparseVector, StoredPoint
 
 DENSE, SPARSE = "dense", "sparse"
 INDEXED_FIELDS = ("artifact_id", "key", "section", "artifact_type", "lifecycle.state", "source.version")
 
 
 class LlamaIndexQdrantStore:
-    def __init__(self, url: str, client: QdrantClient | None = None) -> None:
-        self._client = client or QdrantClient(url=url)
+    def __init__(self, url: str, client: QdrantClient | None = None, api_key: str | None = None) -> None:
+        self._client = client or QdrantClient(url=url, api_key=api_key or None)
         self._pending: dict[str, SparseVector] = {}
 
     def ensure_collection(self, name: str, model_info: dict[str, Any]) -> None:
@@ -70,6 +70,44 @@ class LlamaIndexQdrantStore:
         )
         self._client.delete(collection, points_selector=models.FilterSelector(filter=selector), wait=True)
 
+    def delete_points(self, collection: str, point_ids: Sequence[str]) -> None:
+        self._client.delete(
+            collection, points_selector=models.PointIdsList(points=list(point_ids)), wait=True
+        )
+
+    def get_points(self, collection: str, point_ids: Sequence[str]) -> Sequence[StoredPoint]:
+        if not point_ids:
+            return []
+        records = self._client.retrieve(collection, list(point_ids), with_payload=True, with_vectors=True)
+        return [_stored(r) for r in records]
+
+    def find_mentions(self, collection: str, term: str, limit: int = 256) -> Sequence[dict[str, Any]]:
+        # Phrase match narrows the candidates on the server (R-10 is tokenized as "r", "10");
+        # the caller confirms the whole identifier in the text.
+        records, _ = self._client.scroll(
+            collection,
+            scroll_filter=models.Filter(
+                must=[models.FieldCondition(key="text", match=models.MatchPhrase(phrase=term))]
+            ),
+            limit=limit,
+            with_payload=["artifact_id", "key", "title", "authority", "text"],
+            with_vectors=False,
+        )
+        return [dict(r.payload or {}) for r in records]
+
+    def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:
+        if not self._client.collection_exists(collection):
+            return
+        offset: Any = None
+        while True:
+            records, offset = self._client.scroll(
+                collection, limit=256, offset=offset, with_payload=True, with_vectors=False
+            )
+            for record in records:
+                yield str(record.id), dict(record.payload or {})
+            if offset is None:
+                return
+
     def search(
         self, collection: str, query: Embedding, limit: int, filters: dict[str, Any] | None = None
     ) -> Sequence[SearchHit]:
@@ -92,6 +130,22 @@ class LlamaIndexQdrantStore:
     def _precomputed_sparse(self, texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
         vectors = [self._pending[text] for text in texts]
         return [list(v.indices) for v in vectors], [list(v.values) for v in vectors]
+
+
+def _stored(record: models.Record) -> StoredPoint:
+    vectors = record.vector if isinstance(record.vector, dict) else {}
+    dense = vectors.get(DENSE)
+    sparse = vectors.get(SPARSE)
+    return StoredPoint(
+        point_id=str(record.id),
+        embedding=Embedding(
+            dense=tuple(float(x) for x in cast(list[float], dense)) if isinstance(dense, list) else (),
+            sparse=SparseVector(tuple(sparse.indices), tuple(sparse.values))
+            if isinstance(sparse, models.SparseVector)
+            else SparseVector((), ()),
+        ),
+        payload=dict(record.payload or {}),
+    )
 
 
 def _no_sparse_queries(texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:

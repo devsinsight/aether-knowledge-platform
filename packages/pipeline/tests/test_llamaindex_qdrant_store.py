@@ -81,3 +81,20 @@ def test_hybrid_search_filters_by_state() -> None:
     hits = adapter.search("aether", EMBEDDINGS[0], 2, {"lifecycle.state": ["validated"]})
     assert hits and hits[0].point_id == chunks()[0].point_id
     assert adapter.search("aether", EMBEDDINGS[0], 2, {"lifecycle.state": ["draft"]}) == []
+
+
+def test_points_come_back_with_vectors_for_reuse() -> None:
+    adapter, _ = store()
+    adapter.upsert("aether", chunks(), EMBEDDINGS)
+    (point,) = adapter.get_points("aether", [chunks()[1].point_id, "00000000-0000-0000-0000-000000000000"])
+    assert point.embedding == EMBEDDINGS[1]
+    assert point.payload["text"] == "The HUD shows the multiplier."
+
+
+def test_find_mentions_and_delete_points() -> None:
+    adapter, _ = store()
+    adapter.upsert("aether", chunks(), EMBEDDINGS)
+    assert [p["title"] for p in adapter.find_mentions("aether", "HUD")] == ["Scoring & Chains"]
+    assert adapter.find_mentions("aether", "Leaderboard") == []
+    adapter.delete_points("aether", [chunks()[0].point_id])
+    assert [pid for pid, _ in adapter.list_points("aether")] == [chunks()[1].point_id]

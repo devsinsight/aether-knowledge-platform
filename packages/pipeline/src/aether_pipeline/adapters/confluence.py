@@ -16,6 +16,7 @@ import httpx
 
 from aether_core.domain.contract import Authority, Source, normalize
 from aether_core.domain.sections import section_from_ancestors
+from aether_core.domain.sync import ListedItem
 from aether_core.ports import SourceItem
 
 PROVIDER = "confluence"
@@ -116,5 +117,33 @@ class ConfluenceReader:
         response.raise_for_status()
         return map_page(response.json(), self._base_url)
 
-    def list_items(self, scope: dict[str, str]) -> Iterable[str]:
-        raise NotImplementedError("Listing a space comes in the full wiki adapter increment")
+    def list_versions(self, scope: dict[str, str]) -> Iterable[ListedItem]:
+        """Current pages of the space with their version and ancestors; bodies are not read.
+
+        Archived and deleted pages are not listed, so the sync plan reports them as deleted.
+        """
+        start, limit = 0, 100
+        while True:
+            response = self._client.get(
+                f"{self._base_url}/rest/api/content",
+                params={
+                    "spaceKey": scope["space"],
+                    "type": "page",
+                    "status": "current",
+                    "expand": "version,ancestors",
+                    "start": start,
+                    "limit": limit,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            for page in data.get("results", []):
+                yield ListedItem(
+                    item_id=str(page["id"]),
+                    version=str(page["version"]["number"]),
+                    title=page["title"],
+                    ancestor_titles=tuple(a["title"] for a in page.get("ancestors", [])),
+                )
+            if data.get("size", 0) < limit or "next" not in data.get("_links", {}):
+                return
+            start += limit

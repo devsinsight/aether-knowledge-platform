@@ -31,6 +31,25 @@ uv run pytest -q
 
 Credentials come from the environment (`.env`, see `.env.example`) and use read-only accounts. Never commit them.
 
+## Operate
+
+One compose file runs the platform: `qdrant` (with its Web UI), `sync` (the pipeline, with an internal API) and, on demand, `knowledge-mcp` and the `pipeline` CLI. Each service reads only its own git-ignored env file (`.env`, `.env.qdrant`, `.env.knowledge-mcp`; see the `*.example` files): read-only source accounts in `sync`, the Qdrant read-only key in `knowledge-mcp`.
+
+```
+docker compose -f deploy/compose.yaml up -d qdrant sync
+```
+
+### Sync (manual: preview, then run)
+
+```
+docker compose -f deploy/compose.yaml exec sync aether-pipeline sync pipelines/confluence-aether.yaml --preview
+docker compose -f deploy/compose.yaml exec sync aether-pipeline sync pipelines/confluence-aether.yaml
+```
+
+The preview lists new, changed and deleted pages and changes nothing. The run ingests new and changed pages with the same pipeline as a full run (same chunks and point IDs), reuses the embeddings of chunks whose embedded text did not change, deletes the points of pages deleted or archived at the source, and reports the **affected context**: for each changed or deleted page, the indexed items that reference it, by its key or by the identifiers in the text that changed (R-10, ADR-005, Q-03), with their owners. Related items are only reported, never re-embedded. From an agent: `sync.preview`, `sync.run` (after the user confirms) and `sync.status` in the Knowledge MCP.
+
+The state store (`state/runs.sqlite`) records the last indexed version and chunk hashes of each page. It is derived data: `docker compose -f deploy/compose.yaml --profile tools run --rm pipeline state rebuild pipelines/confluence-aether.yaml` rebuilds it from the projection.
+
 ## Retrieval quality
 
 ```
@@ -48,4 +67,6 @@ Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2
 ## Status
 
 - [x] Increment 1: scaffold (workspace, contract, domain model, ports, layer contracts, CI)
-- [ ] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency, rebuild and validated-only search (2026-11-13), also after moving the adapters to LlamaIndex
+- [x] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency, rebuild and validated-only search (2026-11-13), also after moving the adapters to LlamaIndex
+- [x] Increment: Sync (incremental mode, preview and run, affected context, internal API, sync tools in the Knowledge MCP). Live on the AETHER space (2026-11-14): criteria 1, 2, 5 and 6 passed (ADR-019 v4: 1 of 4 chunks embedded, 3 reused); 3 and 4 are covered by tests and wait for a page archived and a rule edited at the source; Qdrant API keys not set yet
+- [ ] Increment: Publish (publisher service, work record tools)
