@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
 from qdrant_client import QdrantClient
 
 from aether_core.domain.contract import Authority, Chunk, Source, normalize
 from aether_core.ports import Embedding, SparseVector
 from aether_pipeline.adapters.llamaindex_qdrant_store import DENSE, SPARSE, LlamaIndexQdrantStore
+
+# In-memory Qdrant ignores payload indexes; the server used in production applies them.
+pytestmark = pytest.mark.filterwarnings("ignore:Payload indexes have no effect in the local Qdrant")
 
 MODEL_INFO = {"dense_model": "fake", "dense_size": 2, "sparse_model": "fake"}
 

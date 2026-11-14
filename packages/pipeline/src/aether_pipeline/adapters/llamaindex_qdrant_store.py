@@ -83,12 +83,19 @@ class LlamaIndexQdrantStore:
             dense_vector_name=DENSE,
             sparse_vector_name=SPARSE,
             sparse_doc_fn=self._precomputed_sparse,
+            # Without a query function, LlamaIndex loads its default SPLADE model; queries never go
+            # through LlamaIndex (see search below), so none is needed.
+            sparse_query_fn=_no_sparse_queries,
             flat_metadata=False,
         )
 
     def _precomputed_sparse(self, texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
         vectors = [self._pending[text] for text in texts]
         return [list(v.indices) for v in vectors], [list(v.values) for v in vectors]
+
+
+def _no_sparse_queries(texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
+    raise NotImplementedError("Search uses the Qdrant client directly, not LlamaIndex queries")
 
 
 def _node(chunk: Chunk, embedding: Embedding) -> TextNode:
