@@ -26,7 +26,19 @@ from aether_core.domain.contract import Chunk
 from aether_core.ports import Embedding, SearchHit, SparseVector, StoredPoint
 
 DENSE, SPARSE = "dense", "sparse"
-INDEXED_FIELDS = ("artifact_id", "key", "section", "artifact_type", "lifecycle.state", "source.version")
+INDEXED_FIELDS = (
+    "artifact_id",
+    "key",
+    "section",
+    "artifact_type",
+    "lifecycle.state",
+    "source.version",
+    # Cross-source links: lookups by address in both directions.
+    "addresses",
+    "links[].target_id",
+    "links[].target_item",
+)
+_SUMMARY = ["artifact_id", "key", "title", "lifecycle", "source", "addresses", "ancestor_titles"]
 
 
 class LlamaIndexQdrantStore:
@@ -36,6 +48,11 @@ class LlamaIndexQdrantStore:
 
     def ensure_collection(self, name: str, model_info: dict[str, Any]) -> None:
         if self._client.collection_exists(name):
+            # Indexes added by a later increment are created on the existing collection; no data changes.
+            present = set(self._client.get_collection(name).payload_schema)
+            for field in INDEXED_FIELDS:
+                if field not in present:
+                    self._client.create_payload_index(name, field, models.PayloadSchemaType.KEYWORD)
             return
         self._client.create_collection(
             name,
@@ -94,6 +111,40 @@ class LlamaIndexQdrantStore:
             with_vectors=False,
         )
         return [dict(r.payload or {}) for r in records]
+
+    def find_by_address(self, collection: str, addresses: Sequence[str]) -> Sequence[dict[str, Any]]:
+        if not addresses:
+            return []
+        records, _ = self._client.scroll(
+            collection,
+            scroll_filter=models.Filter(
+                must=[models.FieldCondition(key="addresses", match=models.MatchAny(any=list(addresses)))]
+            ),
+            limit=256,
+            with_payload=_SUMMARY,
+            with_vectors=False,
+        )
+        return [dict(r.payload or {}) for r in records]
+
+    def find_linking(self, collection: str, addresses: Sequence[str]) -> Sequence[tuple[str, dict[str, Any]]]:
+        if not addresses:
+            return []
+        records, _ = self._client.scroll(
+            collection,
+            scroll_filter=models.Filter(
+                should=[
+                    models.FieldCondition(key=field, match=models.MatchAny(any=list(addresses)))
+                    for field in ("links[].target_id", "links[].target_item")
+                ]
+            ),
+            limit=256,
+            with_payload=[*_SUMMARY, "authority", "links"],
+            with_vectors=False,
+        )
+        return [(str(r.id), dict(r.payload or {})) for r in records]
+
+    def set_links(self, collection: str, point_id: str, links: list[dict[str, Any]]) -> None:
+        self._client.set_payload(collection, payload={"links": links}, points=[point_id], wait=True)
 
     def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:
         if not self._client.collection_exists(collection):

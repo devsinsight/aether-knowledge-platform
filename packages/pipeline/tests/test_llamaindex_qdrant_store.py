@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from qdrant_client import QdrantClient
 
 from aether_core.domain.contract import Authority, Chunk, Source, normalize
+from aether_core.domain.links import Link, LinkReference, SourceRef
 from aether_core.ports import Embedding, SparseVector
 from aether_pipeline.adapters.llamaindex_qdrant_store import DENSE, SPARSE, LlamaIndexQdrantStore
 
@@ -98,3 +101,26 @@ def test_find_mentions_and_delete_points() -> None:
     assert adapter.find_mentions("aether", "Leaderboard") == []
     adapter.delete_points("aether", [chunks()[0].point_id])
     assert [pid for pid, _ in adapter.list_points("aether")] == [chunks()[1].point_id]
+
+
+def test_links_are_found_by_address_in_both_directions_and_updated_in_place() -> None:
+    """Cross-source links: the payload indexes and lookups the resolver and the affected context use."""
+    adapter, client = store()
+    page, frame = chunks()
+    link = Link(LinkReference("https://miro.com/app/board/b=/", "embed"), SourceRef("miro", "b="))
+    page = replace(page, links=(link,), addresses=("confluence:1",))
+    frame = replace(frame, addresses=("miro:b=:f1", "miro:b="), ancestors=("Ship Prototypes",))
+    adapter.upsert("aether", [page, frame], EMBEDDINGS)
+    adapter.ensure_collection("aether", MODEL_INFO)  # again: missing indexes only, nothing else changes
+
+    (found,) = adapter.find_by_address("aether", ["miro:b="])
+    assert found["addresses"] == ["miro:b=:f1", "miro:b="] and "text" not in found
+    (linking,) = adapter.find_linking("aether", ["miro:b=:f1", "miro:b="])
+    assert linking[0] == page.point_id and linking[1]["links"][0]["resolved"] is False
+    assert adapter.find_linking("aether", []) == [] and adapter.find_by_address("aether", ["x"]) == []
+
+    resolved = {**linking[1]["links"][0], "resolved": True}
+    adapter.set_links("aether", page.point_id, [resolved])
+    (point,) = client.retrieve("aether", [page.point_id], with_payload=True, with_vectors=True)
+    assert (point.payload or {})["links"][0]["resolved"] is True
+    assert (point.payload or {})["text"] == page.text and point.vector  # text and vectors stay

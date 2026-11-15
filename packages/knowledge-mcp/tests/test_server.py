@@ -117,3 +117,66 @@ def test_unscoped_search_skips_drafts_and_scoped_work_records_are_labeled() -> N
     assert record["text"] == "first\n\nsecond" and record["authoritative"] is False and record["note"]
     (validated,) = server.group_work_records([chunk(0, "x", "validated")])
     assert validated["authoritative"] is True and validated["note"] is None
+
+
+def test_get_related_returns_linked_items_in_both_directions() -> None:
+    """Cross-source links: a page that embeds a board and the board's frames find each other."""
+    from qdrant_client import QdrantClient, models
+
+    qdrant = QdrantClient(":memory:")
+    qdrant.create_collection(server.COLLECTION, vectors_config={})
+    embed = {
+        "kind": "embed",
+        "url": "https://miro.com/app/board/b=/",
+        "text": "",
+        "context": "The Miro board holds the prototypes.",
+        "heading_path": ["Ships", "Prototypes and Concept Art"],
+        "target": {"provider": "miro", "id": "b=", "item": None},
+        "target_id": "miro:b=",
+        "target_item": None,
+        "resolved": True,
+    }
+    asset = {**embed, "kind": "link", "url": "https://app.scenario.com/assets?openAssetId=a", "target": None}
+    asset.update(target_id=None, resolved=False)
+
+    def point(
+        n: int, artifact_id: str, state: str, addresses: list[str], links: list[Any]
+    ) -> models.PointStruct:
+        payload = {
+            "artifact_id": artifact_id,
+            "title": artifact_id,
+            "key": None,
+            "lifecycle": {"state": state},
+            "addresses": addresses,
+            "links": links,
+        }
+        return models.PointStruct(id=n, vector={}, payload=payload)
+
+    qdrant.upsert(
+        server.COLLECTION,
+        [
+            point(1, "confluence:9076737", "validated", ["confluence:9076737"], [embed, asset]),
+            point(2, "miro:b=:f1", "draft", ["miro:b=:f1", "miro:b=", "miro:b=:n1"], []),
+            point(3, "miro:b=:f2", "draft", ["miro:b=:f2", "miro:b="], []),
+        ],
+    )
+    page = server.related_items(qdrant, None, "confluence:9076737", 50)
+    frames = {i["artifact_id"]: i for i in page["items"] if i["artifact_id"].startswith("miro:")}
+    assert set(frames) == {"miro:b=:f1", "miro:b=:f2"}
+    assert frames["miro:b=:f1"]["relations"][0]["relation"] == "linked_from_this"
+    assert frames["miro:b=:f1"]["authoritative"] is False  # drafts are labeled, not hidden
+    assert [e["url"] for e in page["external_links"]] == [asset["url"]]
+
+    frame = server.related_items(qdrant, None, "miro:b=:f1", 50)
+    (embedding,) = [i for i in frame["items"] if i["artifact_id"] == "confluence:9076737"]
+    assert embedding["relations"] == [
+        {
+            "relation": "links_to_this",
+            "kind": "embed",
+            "url": embed["url"],
+            "text": "",
+            "context": embed["context"],
+            "heading_path": embed["heading_path"],
+        }
+    ]
+    assert "error" in server.related_items(qdrant, None, None, 50)

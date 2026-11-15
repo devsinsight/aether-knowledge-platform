@@ -140,6 +140,21 @@ class MemoryStore:
     def find_mentions(self, collection: str, term: str, limit: int = 256) -> Sequence[dict[str, Any]]:
         return [p for p in self.payloads() if mentions(p["text"], term)][:limit]
 
+    def find_by_address(self, collection: str, addresses: Sequence[str]) -> Sequence[dict[str, Any]]:
+        return [p for p in self.payloads() if set(p.get("addresses") or []) & set(addresses)]
+
+    def find_linking(self, collection: str, addresses: Sequence[str]) -> Sequence[tuple[str, dict[str, Any]]]:
+        wanted = set(addresses)
+        return [
+            (pid, p)
+            for pid, (p, _) in self.points.items()
+            if any({link["target_id"], link["target_item"]} & wanted for link in p.get("links") or [])
+        ]
+
+    def set_links(self, collection: str, point_id: str, links: list[dict[str, Any]]) -> None:
+        payload, embedding = self.points[point_id]
+        self.points[point_id] = ({**payload, "links": links}, embedding)
+
     def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:
         return [(pid, p) for pid, (p, _) in self.points.items()]
 
@@ -339,8 +354,10 @@ def test_excluded_pages_never_enter_the_plan() -> None:
 def test_state_store_is_rebuilt_from_the_projection() -> None:
     p = indexed_space()
     lost = MemoryState()
-    assert RebuildState(p.store, lost).execute(DEFINITION.name, DEFINITION.collection) == 3
+    assert RebuildState(p.store, lost).execute(DEFINITION.name, DEFINITION.collection, "confluence") == 3
     assert lost.items == p.state.items
+    other = MemoryState()  # another source sharing the collection records none of these items
+    assert RebuildState(p.store, other).execute("miro-aether", DEFINITION.collection, "miro") == 0
 
 
 def test_single_item_run_keeps_the_state_store_current() -> None:

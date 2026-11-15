@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
+from aether_core.domain.links import LinkReport
 from aether_core.domain.sync import AffectedContext
 
 RunMode = Literal["full", "incremental", "single_item"]
@@ -22,7 +23,7 @@ class PipelineDefinition:
 
     name: str
     source: str
-    scope: dict[str, str]
+    scope: dict[str, Any]  # per source: a wiki space, a list of boards, ...
     collection: str
     filters: dict[str, str] = field(default_factory=dict)
     exclusions: tuple[str, ...] = (AGENT_WORKSPACE_TITLE,)
@@ -61,6 +62,7 @@ class PipelineRun:
     items: tuple[str, ...] = ()
     deleted: tuple[str, ...] = ()
     affected: tuple[AffectedContext, ...] = ()
+    links: LinkReport = field(default_factory=LinkReport)
 
     def start(self) -> PipelineRun:
         return replace(self, status="running", started_at=datetime.now(UTC))
@@ -74,6 +76,9 @@ class PipelineRun:
 
     def report(self, affected: tuple[AffectedContext, ...]) -> PipelineRun:
         return replace(self, affected=affected)
+
+    def report_links(self, report: LinkReport) -> PipelineRun:
+        return replace(self, links=self.links.merge(report))
 
     def finish(self) -> PipelineRun:
         status: RunStatus = "failed" if self.errors else "succeeded"

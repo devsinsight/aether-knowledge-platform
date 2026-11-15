@@ -1,0 +1,20 @@
+# Pipeline definition: the Miro boards of the source registry -> collection "aether". No credentials here.
+# One item per frame (or the whole board when it has no frames). Each board takes the section of the
+# Confluence page that embeds it; Miro has no owner or lifecycle state, so those stay missing (gap G-P01).
+name: miro-aether
+source: miro
+scope:
+  boards:
+    - { id: uXjVEUsQI3c=, section: product }              # Player State Machine (03 - Gameplay)
+    - { id: uXjVEUsWkuU=, section: product }              # UI Mockups
+    - { id: uXjVETeyqQ8=, section: industry-extensions }  # Enemies & Bosses (Section 8)
+    - { id: uXjVEUtu_Z0=, section: industry-extensions }  # Stage Layouts (Stages, Section 8)
+    - { id: uXjVEUtjxFw=, section: industry-extensions }  # Ship Prototypes (Ships, Section 8)
+    - { id: uXjVEUsa9ek=, section: technical }            # System Architecture (C4 L2)
+    - { id: uXjVETbLtl0=, section: technical }            # Physical Architecture
+    - { id: uXjVETTXazU=, section: technical }            # Logical Architecture
+    - { id: uXjVETYudFE=, section: business }             # Business (Business Model & Operations)
+collection: aether
+filters:
+  max_tokens: 512   # token limit of the dense model (bge-base-en-v1.5)
+exclusions: []

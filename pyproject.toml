@@ -36,6 +36,8 @@ ignore = ["packages/core/tests/test_contract.py"]
 [tool.pytest.ini_options]
 testpaths = ["packages"]
 addopts = "--import-mode=importlib"
+# Test modules that share in-memory fakes import them from their own folder.
+pythonpath = ["packages/pipeline/tests"]
 
 # Hexagonal layer contracts: copied as-is from the aief asset importlinter.toml.
 [tool.importlinter]
@@ -81,6 +83,11 @@ name = "Adapters never call entry points"
 type = "forbidden"
 source_modules = ["aether_pipeline.adapters"]
 forbidden_modules = ["aether_pipeline.entrypoints"]
+
+[[tool.importlinter.contracts]]
+name = "Readers never import each other (cross-source links are resolved by a use case)"
+type = "independence"
+modules = ["aether_pipeline.adapters.confluence", "aether_pipeline.adapters.miro"]
 
 [[tool.importlinter.contracts]]
 name = "Knowledge MCP is isolated from the pipeline"

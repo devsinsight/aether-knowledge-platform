@@ -1,6 +1,7 @@
 """Knowledge MCP (AIEF ADR-010): query, sync and publish tools in one server that never writes.
 
-- Query: ``knowledge.search``, ``knowledge.get_work_records``. Results carry provenance and state; only
+- Query: ``knowledge.search``, ``knowledge.get_related`` (by key and by cross-source links, in both
+  directions), ``knowledge.get_work_records``. Results carry provenance and state; only
   ``validated`` knowledge is returned by default; draft work records are labeled non-authoritative.
 - Sync: ``sync.preview``, ``sync.run`` (the agent asks the user first), ``sync.status``.
 - Publish: ``work_records.publish(path)`` (the agent asks the user first), ``work_records.status``.
@@ -114,8 +115,9 @@ def _call(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
 @server.tool(
     name="sync.preview",
     description=(
-        "Show what an incremental sync of the knowledge base would do: new, changed and deleted "
-        "source items. Changes nothing."
+        "Show what an incremental sync of the knowledge base would do, per source (wiki, Miro "
+        "boards): new, changed and deleted items, or the error of a source that cannot be read. "
+        "Changes nothing."
     ),
 )
 def sync_preview() -> dict[str, Any]:
@@ -127,7 +129,7 @@ def sync_preview() -> dict[str, Any]:
     description=(
         "Start an incremental sync of the knowledge base from its sources. It changes the projection: "
         "ALWAYS show the user the result of sync.preview and ask for confirmation before calling it. "
-        "Returns a run_id; follow it with sync.status."
+        "Returns one run ID per source (run_ids); follow each with sync.status."
     ),
 )
 def sync_run() -> dict[str, Any]:
@@ -137,8 +139,8 @@ def sync_run() -> dict[str, Any]:
 @server.tool(
     name="sync.status",
     description=(
-        "Status of a sync run (the latest when run_id is omitted): steps, counts, errors and the "
-        "affected context (related items and their owners)."
+        "Status of a sync run (the latest run of each source when run_id is omitted): steps, counts, "
+        "errors and the affected context (related items and their owners)."
     ),
 )
 def sync_status(run_id: str | None = None) -> dict[str, Any]:
@@ -219,6 +221,101 @@ def knowledge_get_work_records(key: str, limit: int = 200) -> list[dict[str, Any
         COLLECTION, scroll_filter=work_records_filter(key), limit=limit, with_payload=True
     )
     return group_work_records([dict(p.payload or {}) for p in points])
+
+
+_SUMMARY = ["artifact_id", "key", "title", "lifecycle", "source", "addresses", "ancestor_titles"]
+
+
+def _scroll(qdrant: QdrantClient, query_filter: models.Filter, payload: Any, limit: int) -> list[Any]:
+    points, _ = qdrant.scroll(COLLECTION, scroll_filter=query_filter, limit=limit, with_payload=payload)
+    return list(points)
+
+
+def _any(field: str, values: list[str]) -> models.FieldCondition:
+    return models.FieldCondition(key=field, match=models.MatchAny(any=values))
+
+
+def related_items(
+    qdrant: QdrantClient, key: str | None, artifact_id: str | None, limit: int
+) -> dict[str, Any]:
+    """Items sharing the key or declaring it, and items linked by target ID in both directions."""
+    if not key and not artifact_id:
+        return {"error": "pass a key or an artifact_id"}
+    own_filter = _any("key", [key]) if key else _any("artifact_id", [str(artifact_id)])
+    own = _scroll(qdrant, models.Filter(must=[own_filter]), True, limit)
+    own_ids = {str((p.payload or {}).get("artifact_id")) for p in own}
+    addresses = sorted({a for p in own for a in (p.payload or {}).get("addresses") or []})
+    items: dict[str, dict[str, Any]] = {}
+
+    def add(payload: dict[str, Any], relation: dict[str, Any]) -> None:
+        state = (payload.get("lifecycle") or {}).get("state")
+        entry = items.setdefault(
+            str(payload.get("artifact_id")),
+            {
+                "artifact_id": payload.get("artifact_id"),
+                "title": payload.get("title"),
+                "key": payload.get("key"),
+                "state": state,
+                "authoritative": state == "validated",
+                "source": payload.get("source"),
+                "relations": [],
+            },
+        )
+        if relation not in entry["relations"]:
+            entry["relations"].append(relation)
+
+    for point in own:
+        add(dict(point.payload or {}), {"relation": "self" if artifact_id else "same_key"})
+    if key:
+        declaring = _scroll(qdrant, models.Filter(must=[_any("relationships[].key", [key])]), _SUMMARY, limit)
+        for point in declaring:
+            add(dict(point.payload or {}), {"relation": "declares_key", "key": key})
+
+    external: list[dict[str, Any]] = []
+    for point in own:  # outgoing: what the item embeds or links to
+        for link in (point.payload or {}).get("links") or []:
+            wanted = [a for a in (link.get("target_item"), link.get("target_id")) if a]
+            context = {k: link.get(k) for k in ("kind", "url", "text", "context", "heading_path")}
+            targets = _scroll(qdrant, models.Filter(must=[_any("addresses", wanted[:1])]), _SUMMARY, limit)
+            targets = [t for t in targets if str((t.payload or {}).get("artifact_id")) not in own_ids]
+            if not wanted or not targets:
+                external.append({**context, "resolved": False, "target": link.get("target")})
+            for target in targets:
+                add(dict(target.payload or {}), {"relation": "linked_from_this", **context})
+    if addresses:  # incoming: items whose links point to this one
+        linking = _scroll(
+            qdrant,
+            models.Filter(
+                should=[_any("links[].target_id", addresses), _any("links[].target_item", addresses)]
+            ),
+            [*_SUMMARY, "links"],
+            limit,
+        )
+        for point in linking:
+            payload = dict(point.payload or {})
+            if str(payload.get("artifact_id")) in own_ids:
+                continue
+            for link in payload.get("links") or []:
+                if {link.get("target_id"), link.get("target_item")} & set(addresses):
+                    context = {k: link.get(k) for k in ("kind", "url", "text", "context", "heading_path")}
+                    add(payload, {"relation": "links_to_this", **context})
+    return {"items": list(items.values()), "external_links": external}
+
+
+@server.tool(
+    name="knowledge.get_related",
+    description=(
+        "Items related to a key or an artifact ID: items with that key or declaring it, and items "
+        "linked across sources in both directions (a page that embeds a board, the board frames it "
+        "embeds, links to work items or assets), each with the link's context. External links that "
+        "no reader resolves are listed apart. Drafts are labeled non-authoritative."
+    ),
+)
+def knowledge_get_related(
+    key: str | None = None, artifact_id: str | None = None, limit: int = 100
+) -> dict[str, Any]:
+    qdrant, _, _ = _clients()
+    return related_items(qdrant, key, artifact_id, limit)
 
 
 def main() -> None:

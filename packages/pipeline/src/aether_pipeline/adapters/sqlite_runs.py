@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aether_core.domain.links import LinkReport, UnresolvedLink
 from aether_core.domain.pipeline import PipelineRun, RunError, StepResult
 from aether_core.domain.sync import AffectedContext, IndexedChunk, IndexedVersion, RelatedItem
 
@@ -73,6 +74,12 @@ def _run_from_json(raw: str) -> PipelineRun:
             related=tuple(RelatedItem(**{**r, "terms": tuple(r["terms"])}) for r in a["related"]),
         )
         for a in data.get("affected", ())
+    )
+    links = data.get("links") or {}
+    data["links"] = LinkReport(
+        tuple((str(h), int(n)) for h, n in links.get("discovered", ())),
+        tuple(UnresolvedLink(**u) for u in links.get("unresolved", ())),
+        tuple(UnresolvedLink(**u) for u in links.get("images_without_origin", ())),
     )
     return PipelineRun(**data)
 

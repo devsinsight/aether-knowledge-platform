@@ -43,6 +43,14 @@ class FakeStore:
     def find_mentions(self, collection: str, term: str, limit: int = 256) -> Sequence[dict[str, Any]]:
         return []
 
+    def find_by_address(self, collection: str, addresses: Sequence[str]) -> Sequence[dict[str, Any]]:
+        return []
+
+    def find_linking(self, collection: str, addresses: Sequence[str]) -> Sequence[tuple[str, dict[str, Any]]]:
+        return []
+
+    def set_links(self, collection: str, point_id: str, links: list[dict[str, Any]]) -> None: ...
+
     def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:
         return []
 
