@@ -1,6 +1,6 @@
 # Aether knowledge platform (Tier 2)
 
-The semantic access platform for the Project Aether knowledge base. It follows the AI Engineering Framework (AIEF): authority stays in the sources (Confluence, Azure Boards, Miro, Scenario), and this platform builds a **rebuildable** projection of them behind a read-only Knowledge MCP and an Ops MCP.
+The semantic access platform for the Project Aether knowledge base. It follows the AI Engineering Framework (AIEF): authority stays in the sources (Confluence, Azure Boards, Miro, Scenario), and this platform builds a **rebuildable** projection of them behind a read-only Knowledge MCP. An Ops MCP, a scheduler and webhooks are optional increments that are not built.
 
 Decision: ADR-019 *Tier 2 Knowledge Platform with the Framework Defaults* (Confluence, 08 - Architecture Decisions).
 
@@ -9,7 +9,7 @@ Decision: ADR-019 *Tier 2 Knowledge Platform with the Framework Defaults* (Confl
 | Path | Contents |
 | --- | --- |
 | `packages/core` (`aether_core`) | Domain: contract v2 (`domain/contract.py`, copied from the aief asset), pipeline model, ports. No infrastructure |
-| `packages/pipeline` (`aether_pipeline`) | `application/` use cases, `adapters/` outbound adapters (LlamaIndex is the ingestion engine: DoclingNodeParser, FastEmbedEmbedding, QdrantVectorStore), `entrypoints/` CLI, webhooks, Ops MCP and the composition root |
+| `packages/pipeline` (`aether_pipeline`) | `application/` use cases, `adapters/` outbound adapters (LlamaIndex is the ingestion engine: DoclingNodeParser, FastEmbedEmbedding, QdrantVectorStore), `entrypoints/` CLI, the internal sync and publisher APIs, and the composition root |
 | `packages/knowledge-mcp` (`aether_knowledge_mcp`) | Read-only Knowledge MCP; never imports the pipeline |
 | `pipelines/` | Pipeline definitions (YAML); no credentials |
 | `golden-set/` | Retrieval questions and expected keys |
@@ -62,6 +62,73 @@ docker compose -f deploy/compose.yaml exec publisher aether-pipeline publisher v
 
 The publisher rejects a file with a missing field, an anchored work item that does not exist, a secret, or a path outside the folder, and never fills a field. It writes `Work Records / Work Records: <feature> / Work Record: <story>` as `draft` with the common record in Page Properties (publishing again adds a version to the same page), then asks `sync` for that page, so the index cites the wiki page and version. A `validated` record is never overwritten by an agent. From an agent: `work_records.publish(path)` (after the user confirms), `work_records.status(story)` and `knowledge.get_work_records(key)`, which labels drafts non-authoritative.
 
+### Connect a client to the Knowledge MCP
+
+The Knowledge MCP runs over **stdio**: the client starts it as a process with `docker compose run`, and the container joins the compose network to reach `qdrant`, `sync` and `publisher`. It works with any local MCP client that can launch a command. Remote clients that need an HTTPS URL (ChatGPT, web apps) cannot connect: there is no HTTP transport yet.
+
+Before connecting:
+
+1. Start Docker, then the platform: `docker compose -f deploy/compose.yaml up -d qdrant sync publisher`.
+2. Create `.env.knowledge-mcp` from `.env.knowledge-mcp.example`. When Qdrant has keys, it holds the Qdrant **read-only** key only.
+3. Build the image: `docker compose -f deploy/compose.yaml build`. Rebuild it after changing the code, then reconnect the client.
+
+Every client runs the same command. Use the absolute path of `deploy/compose.yaml` on your machine:
+
+```
+docker compose -f <repo>/deploy/compose.yaml --profile tools run --rm -i -T knowledge-mcp
+```
+
+`-i -T` keeps stdin open without a terminal, which stdio needs. `--rm` removes the container when the client disconnects. The first call downloads the embedding models into the `model_cache` volume, so it is slow once.
+
+**Claude Code.** Either add the server from the command line (`--scope project` writes `.mcp.json` next to where you run it):
+
+```
+claude mcp add --scope project aether-knowledge -- docker compose -f <repo>/deploy/compose.yaml --profile tools run --rm -i -T knowledge-mcp
+```
+
+or write `.mcp.json` yourself:
+
+```json
+{
+  "mcpServers": {
+    "aether-knowledge": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["compose", "-f", "<repo>/deploy/compose.yaml", "--profile", "tools", "run", "--rm", "-i", "-T", "knowledge-mcp"]
+    }
+  }
+}
+```
+
+Then run `/mcp` in Claude Code to check the connection, or to reconnect after a rebuild.
+
+**Claude Desktop.** Add the same `command` and `args` under `mcpServers` in `claude_desktop_config.json`, then restart the app. The file is in `%APPDATA%\Claude\` on Windows and in `~/Library/Application Support/Claude/` on macOS.
+
+**VS Code (agent mode).** Add the server to `.vscode/mcp.json`. Note that the top-level object is `servers`, not `mcpServers`:
+
+```json
+{
+  "servers": {
+    "aether-knowledge": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["compose", "-f", "<repo>/deploy/compose.yaml", "--profile", "tools", "run", "--rm", "-i", "-T", "knowledge-mcp"]
+    }
+  }
+}
+```
+
+**Without a client.** The MCP Inspector lists the tools and lets you call them by hand:
+
+```
+npx @modelcontextprotocol/inspector docker compose -f <repo>/deploy/compose.yaml --profile tools run --rm -i -T knowledge-mcp
+```
+
+Two rules apply to every client:
+
+- **Confirm before `sync.run` and `work_records.publish`.** Their descriptions tell the agent to ask the user first. Do not auto-approve them in the client.
+- **Give each agent only the tools it needs.** A developer agent gets `knowledge.*`; the orchestrator also gets the sync and publish tools.
+
 ### Knowledge MCP query tools
 
 All read-only over the projection, with provenance and state; only `validated` knowledge by default, and a draft (a Miro frame, for example) is named and returned as a link unless `include_drafts` is set.
@@ -103,8 +170,9 @@ docker compose -f deploy/compose.yaml --profile tools run --rm pipeline eval pip
 | Date | Corpus | Models and settings | recall@5 | MRR |
 | --- | --- | --- | --- | --- |
 | 2026-11-13 | 75 Confluence pages, 446 chunks | bge-base-en-v1.5 + Qdrant/bm25, RRF, HybridChunker max 512 tokens, no reranker | 1.000 | 0.897 (0.882 in the first run) |
+| 2026-11-16 | 78 pages and 39 Miro frames (drafts), 528 points; chunker keeps the top of pages without an h1 | Same | 1.000 | 0.897 (0.912 with drafts) |
 
-Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2026-11-13.md). The baseline is likely optimistic, because the questions reuse the words of the titles and headings. Add questions phrased the way people really ask, before tuning anything.
+Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2026-11-13.md) and [golden-set/report-2026-11-16.md](golden-set/report-2026-11-16.md) (draft). The baseline is likely optimistic, because the questions reuse the words of the titles and headings. Add questions phrased the way people really ask, before tuning anything.
 
 ## Status
 
