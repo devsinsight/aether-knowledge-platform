@@ -1,8 +1,10 @@
 """Knowledge MCP (AIEF ADR-010): query, sync and publish tools in one server that never writes.
 
-- Query: ``knowledge.search``, ``knowledge.get_related`` (by key and by cross-source links, in both
-  directions), ``knowledge.get_work_records``. Results carry provenance and state; only
-  ``validated`` knowledge is returned by default; draft work records are labeled non-authoritative.
+- Query: ``knowledge.search``, ``knowledge.get_context``, ``knowledge.get_document``,
+  ``knowledge.get_decisions``, ``knowledge.get_related`` (by key and by cross-source links, in both
+  directions), ``knowledge.get_gaps``, ``knowledge.get_work_records``. Results carry provenance and
+  state; only ``validated`` knowledge is returned by default; drafts are labeled non-authoritative
+  and returned as links (images and diagrams included).
 - Sync: ``sync.preview``, ``sync.run`` (the agent asks the user first), ``sync.status``.
 - Publish: ``work_records.publish(path)`` (the agent asks the user first), ``work_records.status``.
 
@@ -19,6 +21,8 @@ import httpx
 from fastembed import SparseTextEmbedding, TextEmbedding
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import QdrantClient, models
+
+from aether_knowledge_mcp import queries
 
 COLLECTION = os.environ.get("KNOWLEDGE_COLLECTION", "aether")
 DENSE_MODEL = os.environ.get("DENSE_MODEL", "BAAI/bge-base-en-v1.5")
@@ -77,6 +81,15 @@ def knowledge_search(
     section: str | None = None,
     key: str | None = None,
 ) -> list[dict[str, Any]]:
+    return [
+        to_result(score, payload) for score, payload in _hybrid(query, limit, include_drafts, section, key)
+    ]
+
+
+def _hybrid(
+    query: str, limit: int, include_drafts: bool, section: str | None = None, key: str | None = None
+) -> list[tuple[float, dict[str, Any]]]:
+    """Dense and sparse search fused with RRF: (score, payload) in rank order."""
     qdrant, dense, sparse = _clients()
     query_filter = build_filter(include_drafts, section, key)
     dense_vector = [float(x) for x in next(iter(dense.query_embed(query)))]
@@ -94,7 +107,7 @@ def knowledge_search(
         limit=limit,
         with_payload=True,
     )
-    return [to_result(float(p.score), dict(p.payload or {})) for p in result.points]
+    return [(round(float(p.score), 4), dict(p.payload or {})) for p in result.points]
 
 
 SYNC_URL = os.environ.get("SYNC_URL", "http://sync:8081")
@@ -316,6 +329,80 @@ def knowledge_get_related(
 ) -> dict[str, Any]:
     qdrant, _, _ = _clients()
     return related_items(qdrant, key, artifact_id, limit)
+
+
+@server.tool(
+    name="knowledge.get_document",
+    description=(
+        "One item in full, by artifact ID or key: its text in document order, provenance, owner, "
+        "state, relationships and the links it holds. Drafts are named and linked but not returned "
+        "unless include_drafts is true, and then labeled non-authoritative."
+    ),
+)
+def knowledge_get_document(
+    artifact_id: str | None = None, key: str | None = None, include_drafts: bool = False
+) -> dict[str, Any]:
+    qdrant, _, _ = _clients()
+    return queries.get_document(qdrant, COLLECTION, artifact_id, key, include_drafts)
+
+
+@server.tool(
+    name="knowledge.get_decisions",
+    description=(
+        "Decisions (ADRs) of the Decisions section with their status, date and deciders as their "
+        "page properties state them, and the IDs each one mentions. Filter by key (decisions with "
+        "that key, declaring it or naming it, e.g. 'R-10' or 'ADR-011') or rank by a query. Read a "
+        "decision in full with knowledge.get_document."
+    ),
+)
+def knowledge_get_decisions(
+    key: str | None = None, query: str | None = None, include_drafts: bool = False, limit: int = 50
+) -> list[dict[str, Any]]:
+    qdrant, _, _ = _clients()
+    ranked: list[str] = []
+    if query:
+        hits = _hybrid(query, 40, include_drafts, section=queries.DECISIONS)
+        ranked = list(dict.fromkeys(str(p.get("artifact_id")) for _, p in hits))
+        if not ranked:
+            return []
+    return queries.decisions(qdrant, COLLECTION, key, ranked, include_drafts, limit)
+
+
+@server.tool(
+    name="knowledge.get_gaps",
+    description=(
+        "Knowledge gaps: the rows of the gap register (ID, question, why it matters, owner, needed "
+        "by, and Open or Resolved), with the register's provenance. Filter by key or ID to get the "
+        "gaps that name it (e.g. 'Q-07' or 'ADR-015'). Gaps are open questions, never answers."
+    ),
+)
+def knowledge_get_gaps(key: str | None = None, include_drafts: bool = False) -> dict[str, Any]:
+    qdrant, _, _ = _clients()
+    return queries.gaps(qdrant, COLLECTION, key, include_drafts)
+
+
+@server.tool(
+    name="knowledge.get_context",
+    description=(
+        "Context for working on a topic, in one call: the best items for the query with their "
+        "matching passages, the items linked to them across sources (returned as links), and the "
+        "decisions and knowledge gaps that name them. Optionally scoped by key. Only validated "
+        "knowledge by default."
+    ),
+)
+def knowledge_get_context(
+    query: str, key: str | None = None, limit: int = 5, include_drafts: bool = False
+) -> dict[str, Any]:
+    qdrant, _, _ = _clients()
+    hits = [payload for _, payload in _hybrid(query, limit * 4, include_drafts, key=key)]
+    return queries.context(
+        qdrant,
+        COLLECTION,
+        hits,
+        lambda artifact_id: related_items(qdrant, None, artifact_id, 100),
+        limit,
+        include_drafts,
+    )
 
 
 def main() -> None:
