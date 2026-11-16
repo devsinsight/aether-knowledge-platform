@@ -62,6 +62,22 @@ docker compose -f deploy/compose.yaml exec publisher aether-pipeline publisher v
 
 The publisher rejects a file with a missing field, an anchored work item that does not exist, a secret, or a path outside the folder, and never fills a field. It writes `Work Records / Work Records: <feature> / Work Record: <story>` as `draft` with the common record in Page Properties (publishing again adds a version to the same page), then asks `sync` for that page, so the index cites the wiki page and version. A `validated` record is never overwritten by an agent. From an agent: `work_records.publish(path)` (after the user confirms), `work_records.status(story)` and `knowledge.get_work_records(key)`, which labels drafts non-authoritative.
 
+### Knowledge MCP query tools
+
+All read-only over the projection, with provenance and state; only `validated` knowledge by default, and a draft (a Miro frame, for example) is named and returned as a link unless `include_drafts` is set.
+
+| Tool | Returns |
+| --- | --- |
+| `knowledge.search(query)` | Chunks ranked by hybrid search (dense + BM25, RRF) |
+| `knowledge.get_context(query, key?)` | The best items with their passages, the items linked to them (as links), and the decisions and gaps that name them |
+| `knowledge.get_document(artifact_id or key)` | One item in full, in document order, with owner, relationships and links |
+| `knowledge.get_decisions(key?, query?)` | ADRs with status, date and deciders as their page properties state them, and the IDs they mention |
+| `knowledge.get_related(key or artifact_id)` | Items sharing or declaring a key, and items linked across sources in both directions |
+| `knowledge.get_gaps(key?)` | The rows of the gap register (ID, question, why it matters, owner, needed by, Open or Resolved) |
+| `knowledge.get_work_records(key)` | Work records of a story or feature, drafts labeled non-authoritative |
+
+Decisions and gaps are read as the sources hold them: nothing is inferred, and a field the source does not hold is `null`.
+
 ### Cross-source links
 
 A page often points to knowledge held by another tool: an embedded Miro board, a link to a work item, a Scenario asset. The Confluence reader reads these references from the storage body (next to the text), with their heading path and context: the paragraph that introduces an embed, or the table row with its headers (`Ship: AX-1 Kestrel; ...; Status: Approved`). The Miro reader reads links in item text, embed items and image titles, with the frame as position. Each adapter recognizes only its own URLs (`=` and `%3D` are the same board; `moveToWidget` names an item), and the `ResolveLinks` use case relates them; readers never import each other (import-linter checks it).
@@ -96,5 +112,6 @@ Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2
 - [x] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency, rebuild and validated-only search (2026-11-13), also after moving the adapters to LlamaIndex
 - [x] Increment: Sync (incremental mode, preview and run, affected context, internal API, sync tools in the Knowledge MCP). Live on the AETHER space (2026-11-14): criteria 1, 2, 5 and 6 passed (ADR-019 v4: 1 of 4 chunks embedded, 3 reused); 3 and 4 are covered by tests and wait for a page archived and a rule edited at the source; Qdrant API keys not set yet
 - [ ] Increment: Publish (publisher service, work record tools). Implemented; the 8 criteria pass with fakes and recorded responses. Live run waits for the Work Records page, the wiki write account and a read-only Azure Boards PAT
-- [ ] Increment: Miro reader (REST API v2, one item per frame, versions for Sync, frame chunker; the sync service serves one definition per source). Implemented with a fake API; live run waits for a `boards:read` token
-- [ ] Increment: Cross-source links (embeds, links and images related to their targets with their context; `knowledge.get_related`). The 8 criteria pass with fakes and the recorded Ships page; a dry run on the live Ships page attaches the board embed and the three asset rows to the right chunks. Full ingest pending
+- [x] Increment: Miro reader (REST API v2, one item per frame, versions for Sync, frame chunker; the sync service serves one definition per source). Live on 9 boards (2026-11-15): 39 frames, 51 chunks
+- [x] Increment: Cross-source links (embeds, links and images related to their targets with their context; `knowledge.get_related`). The 8 criteria pass with fakes and the recorded Ships page; a dry run on the live Ships page attaches the board embed and the three asset rows to the right chunks. Live (2026-11-15): full ingest of wiki and boards, the 10 board embeds of 9 pages resolved; golden set unchanged (recall@5 1.000, MRR 0.897)
+- [x] Increment: Knowledge MCP query tools (`knowledge.get_context`, `knowledge.get_document`, `knowledge.get_decisions`, `knowledge.get_gaps`). Implemented with an in-memory Qdrant; with it, the chunker keeps what a page holds before its first heading (28 pages lost it). Live (2026-11-16): full wiki ingest (161 of 477 chunks re-embedded); the 19 ADRs return their status and the 10 gaps their fields; golden set MRR 0.897, 0.912 with drafts
