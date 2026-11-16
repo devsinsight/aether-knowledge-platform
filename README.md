@@ -62,6 +62,18 @@ docker compose -f deploy/compose.yaml exec publisher aether-pipeline publisher v
 
 The publisher rejects a file with a missing field, an anchored work item that does not exist, a secret, or a path outside the folder, and never fills a field. It writes `Work Records / Work Records: <feature> / Work Record: <story>` as `draft` with the common record in Page Properties (publishing again adds a version to the same page), then asks `sync` for that page, so the index cites the wiki page and version. A `validated` record is never overwritten by an agent. From an agent: `work_records.publish(path)` (after the user confirms), `work_records.status(story)` and `knowledge.get_work_records(key)`, which labels drafts non-authoritative.
 
+### Cross-source links
+
+A page often points to knowledge held by another tool: an embedded Miro board, a link to a work item, a Scenario asset. The Confluence reader reads these references from the storage body (next to the text), with their heading path and context: the paragraph that introduces an embed, or the table row with its headers (`Ship: AX-1 Kestrel; ...; Status: Approved`). The Miro reader reads links in item text, embed items and image titles, with the frame as position. Each adapter recognizes only its own URLs (`=` and `%3D` are the same board; `moveToWidget` names an item), and the `ResolveLinks` use case relates them; readers never import each other (import-linter checks it).
+
+Each chunk carries a `links` payload (kind, target, URL, `resolved`, context, heading path) and the `addresses` other items use to point at it. A whole-board embed relates to the board, a link that names an item to the frame that contains it. A target not indexed yet stays `resolved: false` until its source's own run completes it; a URL no adapter recognizes stays an external link and the run reports its host as a discovered source. An image without a link to its origin is reported as a finding. Nothing is copied from the target, and no source is edited. When a linked frame changes, the pages that embed its board appear in the affected context; `knowledge.get_related` returns linked items in both directions.
+
+After adding links to readers that already existed, run a full ingest once (page versions did not change, so a sync would skip them; embeddings are reused when the text did not change):
+
+```
+docker compose -f deploy/compose.yaml exec sync aether-pipeline run pipelines/confluence-aether.yaml --all
+```
+
 Prerequisites for publishing: a **Work Records** page in the space, created by a person (its ID goes in `WORK_RECORDS_PARENT_PAGE_ID`), and a wiki account with write access limited to that tree where Confluence allows it.
 
 ## Retrieval quality
@@ -84,3 +96,5 @@ Full results and findings: [golden-set/report-2026-11-13.md](golden-set/report-2
 - [x] Increment 2: walking skeleton (one Confluence page -> contract -> Docling chunks -> FastEmbed -> Qdrant -> `knowledge.search`). Live run on page 9076781 passed ingestion, idempotency, rebuild and validated-only search (2026-11-13), also after moving the adapters to LlamaIndex
 - [x] Increment: Sync (incremental mode, preview and run, affected context, internal API, sync tools in the Knowledge MCP). Live on the AETHER space (2026-11-14): criteria 1, 2, 5 and 6 passed (ADR-019 v4: 1 of 4 chunks embedded, 3 reused); 3 and 4 are covered by tests and wait for a page archived and a rule edited at the source; Qdrant API keys not set yet
 - [ ] Increment: Publish (publisher service, work record tools). Implemented; the 8 criteria pass with fakes and recorded responses. Live run waits for the Work Records page, the wiki write account and a read-only Azure Boards PAT
+- [ ] Increment: Miro reader (REST API v2, one item per frame, versions for Sync, frame chunker; the sync service serves one definition per source). Implemented with a fake API; live run waits for a `boards:read` token
+- [ ] Increment: Cross-source links (embeds, links and images related to their targets with their context; `knowledge.get_related`). The 8 criteria pass with fakes and the recorded Ships page; a dry run on the live Ships page attaches the board embed and the three asset rows to the right chunks. Full ingest pending

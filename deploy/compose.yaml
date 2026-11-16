@@ -4,7 +4,7 @@
 #   docker compose -f deploy/compose.yaml exec sync aether-pipeline sync pipelines/confluence-aether.yaml
 #
 # Each service gets only the credentials it needs, from its own git-ignored env file:
-#   ../.env                 sync and pipeline: read-only Confluence account, Qdrant admin key
+#   ../.env                 sync and pipeline: read-only Confluence account, Miro boards:read token, Qdrant admin key
 #   ../.env.qdrant          qdrant: admin and read-only API keys
 #   ../.env.knowledge-mcp   knowledge-mcp: the Qdrant READ-ONLY key only
 #   ../.env.publisher       publisher: wiki write account (Work Records only), read-only Azure Boards PAT
@@ -30,7 +30,7 @@ services:
     volumes: ["../state:/app/state", "model_cache:/cache"]
     depends_on: [qdrant]
     restart: unless-stopped
-    command: ["aether-pipeline", "serve", "pipelines/confluence-aether.yaml", "--port", "8081"]
+    command: ["aether-pipeline", "serve", "pipelines/confluence-aether.yaml", "pipelines/miro-aether.yaml", "--port", "8081"]
 
   # Work records: Markdown file (by path) -> wiki page -> sync of that page. The only service with wiki
   # write access (an account limited to the Work Records tree); internal API, no host port.

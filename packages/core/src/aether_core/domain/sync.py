@@ -116,6 +116,7 @@ class Change:
     key: str | None
     title: str
     texts: tuple[str, ...]
+    addresses: tuple[str, ...] = ()  # how links from other items point to this one
 
 
 @dataclass(frozen=True)

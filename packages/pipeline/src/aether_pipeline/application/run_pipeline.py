@@ -8,12 +8,15 @@
 One pipeline in every mode (platform.md, "Three capabilities over one pipeline"): the chunks and
 point IDs of a page are the same whichever mode indexed it. Embeddings of chunks whose embedded text
 did not change are reused from the previous version's points, so only changed text is embedded.
+
+Cross-source links: after chunking, ResolveLinks relates the item's embeds, links and images to their
+targets; after loading or deleting an item, the links of other items that point to it are refreshed.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from aether_core.domain.contract import Chunk
@@ -33,10 +36,12 @@ from aether_core.ports import (
     RunRepository,
     SourceReader,
     StateStore,
+    UrlParser,
     VectorStore,
 )
 from aether_pipeline.application.preview_sync import detect_changes
 from aether_pipeline.application.report_affected_context import ReportAffectedContext
+from aether_pipeline.application.resolve_links import ResolveLinks
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,7 @@ class RunPipeline:
         store: VectorStore,
         runs: RunRepository,
         state: StateStore,
+        url_parsers: Sequence[UrlParser] = (),
     ) -> None:
         self._reader = reader
         self._chunker = chunker
@@ -62,6 +68,7 @@ class RunPipeline:
         self._runs = runs
         self._state = state
         self._affected = ReportAffectedContext(store)
+        self._links = ResolveLinks(url_parsers, store)
 
     def execute(
         self,
@@ -131,6 +138,10 @@ class RunPipeline:
 
         chunks = self._chunker.chunk(artifact)
         run = run.record(StepResult("chunk", processed=len(chunks), item=item_id))
+        chunks, links = self._links.execute(collection, item, chunks)
+        run = run.report_links(links).record(
+            StepResult("enrich", processed=sum(len(c.links) for c in chunks), item=item_id)
+        )
 
         hashes = [_embedding_hash(c) for c in chunks]
         to_embed = [c.embedding_text for c, h in zip(chunks, hashes, strict=True) if h not in cached]
@@ -148,6 +159,8 @@ class RunPipeline:
         if stale:
             self._store.delete_points(collection, stale)
         run = run.record(StepResult("load", processed=len(chunks), item=item_id))
+        # Links of other items that were waiting for this one (or point to its old version) resolve now.
+        self._links.refresh(collection, item.addresses)
 
         self._state.save(
             definition.name,
@@ -176,7 +189,13 @@ class RunPipeline:
         if not changed_texts:
             return _Ingested(run)
         change = Change(
-            item_id, artifact.artifact_id, "changed", artifact.key, artifact.title, tuple(changed_texts)
+            item_id,
+            artifact.artifact_id,
+            "changed",
+            artifact.key,
+            artifact.title,
+            tuple(changed_texts),
+            item.addresses,
         )
         return _Ingested(run, change)
 
@@ -187,8 +206,12 @@ class RunPipeline:
         old_points = self._store.get_points(definition.collection, [c.point_id for c in previous.chunks])
         self._store.delete_artifact(definition.collection, previous.artifact_id)
         self._state.delete(definition.name, item_id)
+        addresses = tuple(str(a) for p in old_points[:1] for a in p.payload.get("addresses") or ())
+        self._links.refresh(definition.collection, addresses)  # links to it are no longer resolved
         texts = tuple(str(p.payload.get("text") or "") for p in old_points)
-        return Change(item_id, previous.artifact_id, "deleted", previous.key, previous.title, texts)
+        return Change(
+            item_id, previous.artifact_id, "deleted", previous.key, previous.title, texts, addresses
+        )
 
 
 def _embedding_hash(chunk: Chunk) -> str:

@@ -7,13 +7,13 @@ Heavy adapters (Docling, FastEmbed) are imported only when a use case that needs
 from __future__ import annotations
 
 import os
-import sys
 from functools import cache
 from pathlib import Path
 
 import yaml
 
 from aether_core.domain.pipeline import AGENT_WORKSPACE_TITLE, PipelineDefinition
+from aether_core.ports import SourceReader, UrlParser
 from aether_pipeline.adapters.sqlite_runs import SqliteRunRepository, SqliteStateStore
 
 DEFAULT_DENSE = "BAAI/bge-base-en-v1.5"
@@ -44,10 +44,14 @@ def load_definition(path: Path) -> PipelineDefinition:
     )
 
 
+class ConfigError(RuntimeError):
+    """A missing or wrong setting. The CLI exits with its message; the sync service reports it per run."""
+
+
 def require(name: str) -> str:
     value = os.environ.get(name)
     if not value:
-        sys.exit(f"Missing environment variable {name} (see .env.example)")
+        raise ConfigError(f"Missing environment variable {name} (see .env.example)")
     return value
 
 
@@ -85,29 +89,60 @@ def embedder():
     return LlamaIndexFastEmbedEmbedder(dense_model(), os.environ.get("SPARSE_MODEL", DEFAULT_SPARSE))
 
 
-@cache
-def reader():
-    from aether_pipeline.adapters.confluence import ConfluenceReader
+_readers: dict[str, SourceReader] = {}
 
-    return ConfluenceReader(
-        require("CONFLUENCE_BASE_URL"), require("CONFLUENCE_EMAIL"), require("CONFLUENCE_API_TOKEN")
-    )
+
+def reader(definition: PipelineDefinition) -> SourceReader:
+    """The read-only SourceReader of a definition's source, built once per pipeline."""
+    if definition.name not in _readers:
+        if definition.source == "confluence":
+            from aether_pipeline.adapters.confluence import ConfluenceReader
+
+            _readers[definition.name] = ConfluenceReader(
+                require("CONFLUENCE_BASE_URL"), require("CONFLUENCE_EMAIL"), require("CONFLUENCE_API_TOKEN")
+            )
+        elif definition.source == "miro":
+            from aether_pipeline.adapters.miro import MiroReader
+
+            _readers[definition.name] = MiroReader(require("MIRO_ACCESS_TOKEN"), definition.scope)
+        else:
+            raise ConfigError(f"Unknown source {definition.source!r} in pipeline {definition.name!r}")
+    return _readers[definition.name]
+
+
+def chunker(definition: PipelineDefinition):
+    """Pages are chunked by structure (Docling); visual board frames are one chunk each."""
+    max_tokens = int(definition.filters.get("max_tokens", 512))
+    if definition.source == "miro":
+        from aether_pipeline.adapters.frame_chunker import FrameChunker, huggingface_counter
+
+        return FrameChunker(huggingface_counter(dense_model()), max_tokens)
+    from aether_pipeline.adapters.llamaindex_chunker import LlamaIndexDoclingChunker
+
+    return LlamaIndexDoclingChunker(tokenizer_model=dense_model(), max_tokens=max_tokens)
+
+
+def url_parsers() -> list[UrlParser]:
+    """One URL parser per adapter that has a reader: links to these sources resolve to indexed items.
+    Parsers need no credentials; readers never import each other, only this composition root sees all."""
+    from aether_pipeline.adapters.confluence import ConfluenceUrls
+    from aether_pipeline.adapters.miro import MiroUrls
+
+    return [ConfluenceUrls(os.environ.get("CONFLUENCE_BASE_URL", "")), MiroUrls()]
 
 
 def run_pipeline(definition: PipelineDefinition):
-    from aether_pipeline.adapters.llamaindex_chunker import LlamaIndexDoclingChunker
     from aether_pipeline.application.run_pipeline import RunPipeline
 
-    chunker = LlamaIndexDoclingChunker(
-        tokenizer_model=dense_model(), max_tokens=int(definition.filters.get("max_tokens", 512))
+    return RunPipeline(
+        reader(definition), chunker(definition), embedder(), store(), runs(), state(), url_parsers()
     )
-    return RunPipeline(reader(), chunker, embedder(), store(), runs(), state())
 
 
-def preview_sync():
+def preview_sync(definition: PipelineDefinition):
     from aether_pipeline.application.preview_sync import PreviewSync
 
-    return PreviewSync(reader(), state())
+    return PreviewSync(reader(definition), state())
 
 
 # Publisher: the only service with wiki write access (an account limited to the Work Records tree).

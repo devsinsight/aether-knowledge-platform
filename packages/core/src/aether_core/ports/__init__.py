@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aether_core.domain.contract import Chunk, NormalizedKnowledgeArtifact
+from aether_core.domain.links import LinkReference, SourceRef
 from aether_core.domain.pipeline import PipelineRun
 from aether_core.domain.sync import IndexedVersion, ListedItem
 
@@ -17,6 +18,24 @@ class SourceItem:
 
     artifact: NormalizedKnowledgeArtifact
     ancestor_titles: tuple[str, ...] = ()
+    # Embeds, links and images found in the item, with their context (cross-source links).
+    references: tuple[LinkReference, ...] = ()
+    # How links from other items address this one: "<provider>:<id>" and "<provider>:<id>:<part>".
+    addresses: tuple[str, ...] = ()
+
+
+class UrlParser(Protocol):
+    """One per adapter: recognizes only its own source's URLs and normalizes the ID (ingestion.md)."""
+
+    @property
+    def provider(self) -> str: ...
+
+    @property
+    def noun(self) -> str:
+        """What the source holds, for the line an embed without text adds ("Embedded board: ...")."""
+        ...
+
+    def parse_url(self, url: str) -> SourceRef | None: ...
 
 
 class SourceReader(Protocol):
@@ -24,7 +43,7 @@ class SourceReader(Protocol):
 
     def read(self, item_id: str) -> SourceItem: ...
 
-    def list_versions(self, scope: dict[str, str]) -> Iterable[ListedItem]:
+    def list_versions(self, scope: dict[str, Any]) -> Iterable[ListedItem]:
         """Every item in scope with its current version, without reading bodies (wiki page version,
         work item revision, Miro modifiedAt per frame, file commit or hash)."""
         ...
@@ -88,6 +107,18 @@ class VectorStore(Protocol):
 
     def find_mentions(self, collection: str, term: str, limit: int = 256) -> Sequence[dict[str, Any]]:
         """Payloads of the chunks whose text contains the term as a whole identifier."""
+        ...
+
+    def find_by_address(self, collection: str, addresses: Sequence[str]) -> Sequence[dict[str, Any]]:
+        """Payloads (without text) of the chunks that declare any of these addresses."""
+        ...
+
+    def find_linking(self, collection: str, addresses: Sequence[str]) -> Sequence[tuple[str, dict[str, Any]]]:
+        """Point IDs and payloads of the chunks whose links point to any of these addresses."""
+        ...
+
+    def set_links(self, collection: str, point_id: str, links: list[dict[str, Any]]) -> None:
+        """Replace the ``links`` payload of one point (text and vectors stay as they are)."""
         ...
 
     def list_points(self, collection: str) -> Iterable[tuple[str, dict[str, Any]]]:

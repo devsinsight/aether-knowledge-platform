@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from aether_core.domain.links import LinkReport, UnresolvedLink
 from aether_core.domain.pipeline import PipelineRun, StepResult
 from aether_core.domain.sync import AffectedContext, IndexedChunk, IndexedVersion, RelatedItem
 from aether_pipeline.adapters.sqlite_runs import SqliteRunRepository, SqliteStateStore
@@ -36,3 +37,15 @@ def test_runs_keep_affected_context_and_latest(tmp_path: Path) -> None:
     assert runs.get("b") == second
     latest = runs.latest("pipe")
     assert latest is not None and latest.run_id == "b"
+
+
+def test_a_run_keeps_its_link_report(tmp_path: Path) -> None:
+    runs = SqliteRunRepository(tmp_path / "r.sqlite")
+    report = LinkReport(
+        (("app.scenario.com", 3),),
+        (UnresolvedLink("9076737", "https://miro.com/app/board/b=/", "miro target not indexed"),),
+        (UnresolvedLink("b=:f2", "", "image without origin: Kestrel concept"),),
+    )
+    run = PipelineRun("r1", "confluence-aether", "full", "cli").start().report_links(report).finish()
+    runs.save(run)
+    assert runs.get("r1") == run

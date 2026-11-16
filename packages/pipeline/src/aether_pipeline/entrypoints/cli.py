@@ -1,10 +1,12 @@
 """CLI ``aether-pipeline``. Wiring is in ``wiring``; credentials come from the environment.
 
 run <pipeline.yaml> --item <id> [--item ...]   ingest the given items
+run <pipeline.yaml> --all                       full ingest of every item in scope (rewrites payloads;
+                                                embeddings are reused when the text did not change)
 sync <pipeline.yaml> --preview                  new, changed and deleted items; changes nothing
 sync <pipeline.yaml>                            apply them (incremental mode) and report affected context
 state rebuild <pipeline.yaml>                   rebuild the state store from the projection
-serve <pipeline.yaml> [--port 8081]             internal sync API (compose network only)
+serve <pipeline.yaml>... [--port 8081]          internal sync API for one or more sources (compose only)
 eval <pipeline.yaml> <golden-set.yaml>          recall@k and MRR
 publisher publish <path>                        publish a work record file (by path) to the wiki
 publisher validate <story> --pr <url> --by <name>   a person or CI approves the record
@@ -33,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("run", help="Run a pipeline for one or more items")
     run.add_argument("pipeline", type=Path)
-    run.add_argument("--item", action="append", required=True, help="Source item ID (repeatable)")
+    targets = run.add_mutually_exclusive_group(required=True)
+    targets.add_argument("--item", action="append", help="Source item ID (repeatable)")
+    targets.add_argument("--all", action="store_true", help="Full ingest of every item in scope")
 
     sync = sub.add_parser("sync", help="Incremental sync: preview, then run")
     sync.add_argument("pipeline", type=Path)
@@ -44,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     state.add_argument("pipeline", type=Path)
 
     serve = sub.add_parser("serve", help="Internal sync API for the compose network")
-    serve.add_argument("pipeline", type=Path)
+    serve.add_argument("pipelines", type=Path, nargs="+", help="One definition per source; the wiki first")
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8081)
 
@@ -70,8 +74,23 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     wiring.load_env(Path(".env"))
+    try:
+        return _dispatch(args)
+    except wiring.ConfigError as error:
+        raise SystemExit(str(error)) from None
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "publisher":
         return _publisher(args)
+    if args.command == "serve":
+        from aether_pipeline.entrypoints.sync_api import SyncService
+        from aether_pipeline.entrypoints.sync_api import serve as serve_api
+
+        definitions = [wiring.load_definition(path) for path in args.pipelines]
+        service = SyncService(definitions, wiring.preview_sync, wiring.run_pipeline, wiring.runs())
+        serve_api(service, args.host, args.port)
+        return 0
     definition = wiring.load_definition(args.pipeline)
 
     if args.command == "eval":
@@ -79,25 +98,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "state":
         from aether_pipeline.application.rebuild_state import RebuildState
 
-        count = RebuildState(wiring.store(), wiring.state()).execute(definition.name, definition.collection)
+        count = RebuildState(wiring.store(), wiring.state()).execute(
+            definition.name, definition.collection, definition.source
+        )
         print(f"state store rebuilt from collection {definition.collection!r}: {count} items")
         return 0
-    if args.command == "serve":
-        from aether_pipeline.entrypoints.sync_api import SyncService
-        from aether_pipeline.entrypoints.sync_api import serve as serve_api
-
-        service = SyncService(
-            definition, wiring.preview_sync, lambda: wiring.run_pipeline(definition), wiring.runs()
-        )
-        serve_api(service, args.host, args.port)
-        return 0
     if args.command == "sync" and args.preview:
-        print_plan(wiring.preview_sync().execute(definition))
+        print_plan(wiring.preview_sync(definition).execute(definition))
         return 0
 
     pipeline = wiring.run_pipeline(definition)
     if args.command == "sync":
         result = pipeline.execute(definition, mode="incremental", trigger="cli")
+    elif args.all:
+        items = [i.item_id for i in wiring.reader(definition).list_versions(definition.scope)]
+        result = pipeline.execute(definition, items, mode="full", trigger="cli")
     else:
         result = pipeline.execute(definition, args.item)
     print_run(result)
@@ -141,6 +156,13 @@ def print_run(run: PipelineRun) -> None:
             )
         if not affected.related:
             print("    no related items found")
+    links = run.links
+    for host, count in links.discovered:
+        print(f"  discovered source {host}: {count} link(s) (no reader; adding it is the user's decision)")
+    for link in links.unresolved:
+        print(f"  unresolved link in {link.item}: {link.url} ({link.reason})")
+    for image in links.images_without_origin:
+        print(f"  finding: {image.reason} (item {image.item})")
 
 
 def _publisher(args: argparse.Namespace) -> int:

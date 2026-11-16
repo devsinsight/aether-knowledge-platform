@@ -15,6 +15,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from aether_core.domain.links import Link
+
 SCHEMA_VERSION = "2"
 
 Section = Literal[
@@ -188,6 +190,12 @@ class Chunk:
     heading_path: tuple[str, ...]
     position: int
     text: str
+    # Cross-source links (platform.md, "Increment: Cross-source links"): set after chunking by
+    # ResolveLinks. Addresses are how links from other items find this one; ancestors name its
+    # container (the page tree, or the board of a frame).
+    links: tuple[Link, ...] = ()
+    addresses: tuple[str, ...] = ()
+    ancestors: tuple[str, ...] = ()
 
     @property
     def point_id(self) -> str:
@@ -228,11 +236,18 @@ class Chunk:
                 "owner": a.authority.owner,
             },
             "permissions": {"classification": a.classification},
-            "relationships": [{"type": r.type, "key": r.target_key} for r in a.relationships],
+            "relationships": [{"type": r.type, "key": r.target_key} for r in a.relationships]
+            + [
+                {"type": "documented_by", "key": key}
+                for key in dict.fromkeys(link.target_key for link in self.links if link.target_key)
+            ],
             "metadata_complete": a.metadata_complete,
             "missing_fields": list(a.missing_fields),
             "content_hash": self.content_hash,
             "heading_path": list(self.heading_path),
             "position": self.position,
             "text": self.text,
+            "links": [link.payload() for link in self.links],
+            "addresses": list(self.addresses),
+            "ancestor_titles": list(self.ancestors),
         }

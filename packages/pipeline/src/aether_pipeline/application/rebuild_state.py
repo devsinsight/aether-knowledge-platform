@@ -18,10 +18,12 @@ class RebuildState:
     def __init__(self, store: VectorStore, state: StateStore) -> None:
         self._store, self._state = store, state
 
-    def execute(self, pipeline: str, collection: str) -> int:
-        """Return the number of items recorded."""
+    def execute(self, pipeline: str, collection: str, provider: str) -> int:
+        """Record the items of one provider (several sources share a collection); return their number."""
         by_artifact: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
         for point_id, payload in self._store.list_points(collection):
+            if (payload.get("source") or {}).get("provider") != provider:
+                continue
             by_artifact[str(payload["artifact_id"])].append((point_id, payload))
 
         for artifact_id, points in by_artifact.items():
