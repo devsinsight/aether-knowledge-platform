@@ -105,15 +105,20 @@ def reader(definition: PipelineDefinition) -> SourceReader:
             from aether_pipeline.adapters.miro import MiroReader
 
             _readers[definition.name] = MiroReader(require("MIRO_ACCESS_TOKEN"), definition.scope)
+        elif definition.source == "azure-boards":
+            from aether_pipeline.adapters.azure_boards import AzureBoardsReader
+
+            _readers[definition.name] = AzureBoardsReader(require("ADO_READ_PAT"), definition.scope)
         else:
             raise ConfigError(f"Unknown source {definition.source!r} in pipeline {definition.name!r}")
     return _readers[definition.name]
 
 
 def chunker(definition: PipelineDefinition):
-    """Pages are chunked by structure (Docling); visual board frames are one chunk each."""
+    """Pages are chunked by structure (Docling); visual board frames and work items are one chunk each,
+    split by lines when too long (ingestion.md, chunking rules)."""
     max_tokens = int(definition.filters.get("max_tokens", 512))
-    if definition.source == "miro":
+    if definition.source in ("miro", "azure-boards"):
         from aether_pipeline.adapters.frame_chunker import FrameChunker, huggingface_counter
 
         return FrameChunker(huggingface_counter(dense_model()), max_tokens)
@@ -125,10 +130,11 @@ def chunker(definition: PipelineDefinition):
 def url_parsers() -> list[UrlParser]:
     """One URL parser per adapter that has a reader: links to these sources resolve to indexed items.
     Parsers need no credentials; readers never import each other, only this composition root sees all."""
+    from aether_pipeline.adapters.azure_boards import AzureBoardsUrls
     from aether_pipeline.adapters.confluence import ConfluenceUrls
     from aether_pipeline.adapters.miro import MiroUrls
 
-    return [ConfluenceUrls(os.environ.get("CONFLUENCE_BASE_URL", "")), MiroUrls()]
+    return [ConfluenceUrls(os.environ.get("CONFLUENCE_BASE_URL", "")), MiroUrls(), AzureBoardsUrls()]
 
 
 def run_pipeline(definition: PipelineDefinition):
