@@ -36,6 +36,8 @@ Credentials come from the environment (`.env`, see `.env.example`) and use read-
 
 One compose file runs the platform: `qdrant` (with its Web UI), `sync` (the pipeline, with an internal API), `publisher` (work records) and, on demand, `knowledge-mcp` and the `pipeline` CLI. Each service reads only its own git-ignored env file (`.env`, `.env.qdrant`, `.env.knowledge-mcp`, `.env.publisher`; see the `*.example` files): read-only source accounts in `sync`, the Qdrant read-only key in `knowledge-mcp`, wiki write access only in `publisher`.
 
+`sync` serves three pipelines: `confluence-aether` (pages), `miro-aether` (board frames) and `azure-boards-aether` (work items: one item per work item with its acceptance criteria numbered `AC-n`; `Removed` is `archived`, a `ready` tag or an Active, Resolved or Closed state is `validated`, the rest is `draft`; keys only from tags). The Azure Boards reader uses `ADO_READ_PAT`, a token with the Work Items (Read) scope only.
+
 ```
 docker compose -f deploy/compose.yaml up -d qdrant sync publisher
 ```

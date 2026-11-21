@@ -1,0 +1,15 @@
+# Pipeline definition: the work items of Azure Boards, project Aether -> collection "aether". No credentials
+# here (the read-only token is ADO_READ_PAT in .env, used by sync only).
+# One item per work item: title, state, iteration, tags, description and acceptance criteria (AC-n).
+# State: Removed -> archived; tag "ready" or state Active/Resolved/Closed -> validated; else draft.
+# Work items are the authority for delivery data (Section 0 - Catalog, Authority by artifact class).
+name: azure-boards-aether
+source: azure-boards
+scope:
+  organization_url: https://dev.azure.com/devsinsight
+  project: Aether
+  work_item_types: [Epic, Feature, User Story]
+collection: aether
+filters:
+  max_tokens: 512   # token limit of the dense model (bge-base-en-v1.5)
+exclusions: []

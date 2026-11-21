@@ -30,7 +30,7 @@ services:
     volumes: ["../state:/app/state", "model_cache:/cache"]
     depends_on: [qdrant]
     restart: unless-stopped
-    command: ["aether-pipeline", "serve", "pipelines/confluence-aether.yaml", "pipelines/miro-aether.yaml", "--port", "8081"]
+    command: ["aether-pipeline", "serve", "pipelines/confluence-aether.yaml", "pipelines/miro-aether.yaml", "pipelines/azure-boards-aether.yaml", "--port", "8081"]
 
   # Work records: Markdown file (by path) -> wiki page -> sync of that page. The only service with wiki
   # write access (an account limited to the Work Records tree); internal API, no host port.
